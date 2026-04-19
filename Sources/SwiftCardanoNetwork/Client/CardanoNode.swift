@@ -14,19 +14,17 @@ import NIOPosix
 /// var config = CardanoNetworkConfiguration.mainnet
 /// config.connection.socketPath = "/ipc/node.socket"
 ///
-/// let ntc = try await CardanoNode.connectToClient(config: config)
-/// defer { await ntc.close() }
-///
-/// for try await event in ntc.chainSync.follow() { … }
+/// try await CardanoNode.withClient(config: config) { connection in
+///     for try await event in connection.chainSync.follow() { … }
+/// }
 /// ```
 ///
 /// ## Node-to-Node  (remote peer, TCP)
 ///
 /// ```swift
-/// let ntn = try await CardanoNode.connectToNode(config: .mainnet)
-/// defer { await ntn.close() }
-///
-/// for try await event in ntn.chainSync.follow() { … }
+/// try await CardanoNode.withNode(config: .mainnet) { connection in
+///     for try await event in connection.chainSync.follow() { … }
+/// }
 /// ```
 public enum CardanoNode {
 
@@ -109,5 +107,79 @@ public enum CardanoNode {
         ).negotiate(networkMagic: conn.networkMagic)
 
         return NodeToNodeConnection(channel: channel, demux: demux, protocolConfig: proto)
+    }
+
+    // MARK: - Scoped NtC
+
+    /// Open a Node-to-Client connection, run `body`, then close the connection —
+    /// even if `body` throws.
+    ///
+    /// This is the preferred way to use a connection when you want automatic
+    /// resource management, analogous to a `with` statement in other languages:
+    ///
+    /// ```swift
+    /// try await CardanoNode.withClient(config: config) { connection in
+    ///     for try await event in connection.followTyped() { … }
+    /// }
+    /// ```
+    ///
+    /// - Parameters:
+    ///   - config: Full connection/protocol configuration.
+    ///   - group: The NIO event-loop group to use.
+    ///   - body: A closure that receives the ready-to-use connection.
+    /// - Returns: The value returned by `body`.
+    /// - Throws: Any error thrown by `connectToClient` or `body`.
+    @discardableResult
+    public static func withClient<Result: Sendable>(
+        config: CardanoNetworkConfiguration = .init(),
+        group: EventLoopGroup = MultiThreadedEventLoopGroup.singleton,
+        body: (NodeToClientConnection) async throws -> Result
+    ) async throws -> Result {
+        let connection = try await connectToClient(config: config, group: group)
+        do {
+            let result = try await body(connection)
+            await connection.close()
+            return result
+        } catch {
+            await connection.close()
+            throw error
+        }
+    }
+
+    // MARK: - Scoped NtN
+
+    /// Open a Node-to-Node connection, run `body`, then close the connection —
+    /// even if `body` throws.
+    ///
+    /// This is the preferred way to use a connection when you want automatic
+    /// resource management, analogous to a `with` statement in other languages:
+    ///
+    /// ```swift
+    /// try await CardanoNode.withNode(config: .mainnet) { connection in
+    ///     for try await event in connection.chainSync.followTyped() { … }
+    /// }
+    /// ```
+    ///
+    /// - Parameters:
+    ///   - config: Full connection/protocol configuration.
+    ///   - group: The NIO event-loop group to use.
+    ///   - body: A closure that receives the ready-to-use connection.
+    /// - Returns: The value returned by `body`.
+    /// - Throws: Any error thrown by `connectToNode` or `body`.
+    @discardableResult
+    public static func withNode<Result: Sendable>(
+        config: CardanoNetworkConfiguration = .init(),
+        group: EventLoopGroup = MultiThreadedEventLoopGroup.singleton,
+        body: (NodeToNodeConnection) async throws -> Result
+    ) async throws -> Result {
+        let connection = try await connectToNode(config: config, group: group)
+        do {
+            let result = try await body(connection)
+            await connection.close()
+            return result
+        } catch {
+            await connection.close()
+            throw error
+        }
     }
 }

@@ -31,14 +31,16 @@ targets: [
 
 The library implements the full Ouroboros mini-protocol suite over a multiplexed TCP or Unix domain socket connection. All mini-protocols expose a **typed API** backed by [SwiftCardanoCore](https://github.com/Kingpin-Apps/swift-cardano-core) that works with fully-decoded `Block`, `Transaction`, `UTxO`, and `ProtocolParameters` values — no manual CBOR handling required. A lower-level raw API is also available for advanced use cases.
 
-The top-level entry point is `CardanoNode`, which provides two factory methods:
+The top-level entry point is `CardanoNode`, which provides factory methods for both manual and scoped (automatically closed) connections:
 
-| Factory | Transport | Use case |
-|---|---|---|
-| `CardanoNode.connectToClient(config:)` | Unix socket (NtC) | Talking to a local `cardano-node` process |
-| `CardanoNode.connectToNode(config:)` | TCP (NtN) | Connecting to a remote Cardano peer |
+| Factory                                | Transport         | Use case                                     |
+| -------------------------------------- | ----------------- | -------------------------------------------- |
+| `CardanoNode.withClient(config:body:)` | Unix socket (NtC) | **Preferred** — scoped, closes automatically |
+| `CardanoNode.withNode(config:body:)`   | TCP (NtN)         | **Preferred** — scoped, closes automatically |
+| `CardanoNode.connectToClient(config:)` | Unix socket (NtC) | Manual lifetime management                   |
+| `CardanoNode.connectToNode(config:)`   | TCP (NtN)         | Manual lifetime management                   |
 
-Both factory methods perform the Handshake negotiation automatically before returning a ready-to-use connection object.
+All factory methods perform the Handshake negotiation automatically.
 
 ---
 
@@ -54,18 +56,17 @@ import SwiftCardanoNetwork
 var config = CardanoNetworkConfiguration.mainnet
 config.connection.socketPath = "/ipc/node.socket"
 
-let connection = try await CardanoNode.connectToClient(config: config)
-defer { await connection.close() }
-
-// Stream full decoded blocks (requires SwiftCardanoCore)
-for try await event in connection.followTyped() {
-    switch event {
-    case .rollForward(let block, let tip):
-        print("Block txs=\(block.transactionBodies.count) tip=\(tip.blockNo)")
-    case .rollBackward(let point, _):
-        print("Rollback to \(point)")
+try await CardanoNode.withClient(config: config) { connection in
+    // Stream full decoded blocks (requires SwiftCardanoCore)
+    for try await event in connection.followTyped() {
+        switch event {
+        case .rollForward(let block, let tip):
+            print("Block txs=\(block.transactionBodies.count) tip=\(tip.blockNo)")
+        case .rollBackward(let point, _):
+            print("Rollback to \(point)")
+        }
     }
-}
+} // connection closed automatically
 ```
 
 ### Node-to-Node (remote peer)
@@ -75,15 +76,14 @@ Connect to a remote Cardano relay peer over TCP to stream block headers and part
 ```swift
 import SwiftCardanoNetwork
 
-let connection = try await CardanoNode.connectToNode(config: .mainnet)
-defer { await connection.close() }
-
-// Stream decoded block headers (full bodies require BlockFetch)
-for try await event in connection.chainSync.followTyped() {
-    if case .rollForward(let block, let tip) = event {
-        print("Block tip=\(tip.blockNo)")
+try await CardanoNode.withNode(config: .mainnet) { connection in
+    // Stream decoded block headers (full bodies require BlockFetch)
+    for try await event in connection.chainSync.followTyped() {
+        if case .rollForward(let block, let tip) = event {
+            print("Block tip=\(tip.blockNo)")
+        }
     }
-}
+} // connection closed automatically
 ```
 
 ---
@@ -150,15 +150,15 @@ let config = try CardanoNetworkConfiguration.load(fromFile: "/etc/cardano/config
 let config = CardanoNetworkConfiguration.loadFromEnvironment()
 ```
 
-| Variable | Config field |
-|---|---|
-| `CARDANO_NETWORK_SOCKET_PATH` | `connection.socketPath` |
-| `CARDANO_NETWORK_HOST` | `connection.host` |
-| `CARDANO_NETWORK_PORT` | `connection.port` |
-| `CARDANO_NETWORK_MAGIC` | `connection.networkMagic` |
+| Variable                          | Config field                       |
+| --------------------------------- | ---------------------------------- |
+| `CARDANO_NETWORK_SOCKET_PATH`     | `connection.socketPath`            |
+| `CARDANO_NETWORK_HOST`            | `connection.host`                  |
+| `CARDANO_NETWORK_PORT`            | `connection.port`                  |
+| `CARDANO_NETWORK_MAGIC`           | `connection.networkMagic`          |
 | `CARDANO_NETWORK_CONNECT_TIMEOUT` | `connection.connectTimeoutSeconds` |
-| `CARDANO_NETWORK_LOG_LEVEL` | `logging.level` |
-| `CARDANO_NETWORK_METRICS_ENABLED` | `metrics.enabled` |
+| `CARDANO_NETWORK_LOG_LEVEL`       | `logging.level`                    |
+| `CARDANO_NETWORK_METRICS_ENABLED` | `metrics.enabled`                  |
 
 ### Protocol Configuration
 
@@ -239,15 +239,15 @@ try await connection.txSubmission.submit(signedTx, era: .babbage)
 
 The `Era` enum covers all Cardano eras and maps to the wire tag used by the Ouroboros protocol:
 
-| Era | Wire tag |
-|---|---|
-| `.byron` | 0 |
-| `.shelley` | 1 |
-| `.allegra` | 2 |
-| `.mary` | 3 |
-| `.alonzo` | 4 |
-| `.babbage` | 5 |
-| `.conway` | 6 |
+| Era        | Wire tag |
+| ---------- | -------- |
+| `.byron`   | 0        |
+| `.shelley` | 1        |
+| `.allegra` | 2        |
+| `.mary`    | 3        |
+| `.alonzo`  | 4        |
+| `.babbage` | 5        |
+| `.conway`  | 6        |
 
 Use `connection.submitChecked(_:)` (shorthand on `NodeToClientConnection`) to submit and return the `TransactionId` in one call.
 
@@ -317,15 +317,23 @@ try await connection.txSubmission2.run(provider: myMempool)
 
 ## Connection Lifecycle
 
-Both `NodeToClientConnection` and `NodeToNodeConnection` have a `close()` method that shuts down the connection gracefully. For NtN connections this also cancels the background KeepAlive probe loop.
+The preferred way to manage a connection is the scoped `withClient` / `withNode` pattern. The connection is closed automatically when the closure returns, whether it exits normally or throws — analogous to Python's `with` statement or Swift's own `withTaskGroup`:
+
+```swift
+try await CardanoNode.withClient(config: config) { connection in
+    // ... use connection ...
+} // closed here, even if an error was thrown
+```
+
+For cases where you need to manage the lifetime manually (e.g. storing the connection as a property), use the `connect` factories directly and call `close()` yourself:
 
 ```swift
 let connection = try await CardanoNode.connectToClient(config: config)
-defer { await connection.close() }
 // ... use connection ...
+await connection.close()
 ```
 
-`close()` is safe to call multiple times.
+`close()` is `async` — it cannot be called in a `defer` body. It is safe to call multiple times.
 
 ---
 
@@ -350,27 +358,27 @@ config.logging.labelPrefix = "my-app.cardano"
 
 All mini-protocols emit [swift-metrics](https://github.com/apple/swift-metrics)-compatible metrics. Bootstrap a metrics backend (e.g. `prometheus-client-swift`) in your app startup:
 
-| Metric | Type | Description |
-|---|---|---|
-| `cardano_network_bytes_received_total` | Counter | Total bytes received |
-| `cardano_network_bytes_sent_total` | Counter | Total bytes sent |
-| `cardano_network_connections_total` | Counter | Total connections opened |
-| `cardano_network_connections_active` | Gauge | Currently open connections |
-| `cardano_network_handshake_total` | Counter | Handshake completions |
-| `cardano_network_handshake_duration_seconds` | Timer | Handshake latency |
-| `cardano_network_blocks_received_total` | Counter | Blocks received via ChainSync |
-| `cardano_network_rollbacks_total` | Counter | Chain rollback events |
-| `cardano_network_tx_submissions_total` | Counter | Tx submission attempts (`result=accepted\|rejected`) |
-| `cardano_network_tx_submission_duration_seconds` | Timer | Tx submission latency |
-| `cardano_network_query_duration_seconds` | Timer | LocalStateQuery latency |
-| `cardano_network_block_fetch_duration_seconds` | Timer | BlockFetch range download latency |
-| `cardano_network_keepalive_rtt_seconds` | Timer | KeepAlive round-trip time |
-| `cardano_network_mempool_tx_count` | Gauge | Transactions in mempool snapshot |
-| `cardano_network_mempool_capacity_bytes` | Gauge | Mempool capacity in bytes |
-| `cardano_network_chain_tip_slot` | Gauge | Chain tip slot number |
-| `cardano_network_chain_tip_block` | Gauge | Chain tip block number |
-| `cardano_network_sdu_decode_errors_total` | Counter | Mux frame decode failures |
-| `cardano_network_agency_violations_total` | Counter | Protocol agency violations |
+| Metric                                           | Type    | Description                                          |
+| ------------------------------------------------ | ------- | ---------------------------------------------------- |
+| `cardano_network_bytes_received_total`           | Counter | Total bytes received                                 |
+| `cardano_network_bytes_sent_total`               | Counter | Total bytes sent                                     |
+| `cardano_network_connections_total`              | Counter | Total connections opened                             |
+| `cardano_network_connections_active`             | Gauge   | Currently open connections                           |
+| `cardano_network_handshake_total`                | Counter | Handshake completions                                |
+| `cardano_network_handshake_duration_seconds`     | Timer   | Handshake latency                                    |
+| `cardano_network_blocks_received_total`          | Counter | Blocks received via ChainSync                        |
+| `cardano_network_rollbacks_total`                | Counter | Chain rollback events                                |
+| `cardano_network_tx_submissions_total`           | Counter | Tx submission attempts (`result=accepted\|rejected`) |
+| `cardano_network_tx_submission_duration_seconds` | Timer   | Tx submission latency                                |
+| `cardano_network_query_duration_seconds`         | Timer   | LocalStateQuery latency                              |
+| `cardano_network_block_fetch_duration_seconds`   | Timer   | BlockFetch range download latency                    |
+| `cardano_network_keepalive_rtt_seconds`          | Timer   | KeepAlive round-trip time                            |
+| `cardano_network_mempool_tx_count`               | Gauge   | Transactions in mempool snapshot                     |
+| `cardano_network_mempool_capacity_bytes`         | Gauge   | Mempool capacity in bytes                            |
+| `cardano_network_chain_tip_slot`                 | Gauge   | Chain tip slot number                                |
+| `cardano_network_chain_tip_block`                | Gauge   | Chain tip block number                               |
+| `cardano_network_sdu_decode_errors_total`        | Counter | Mux frame decode failures                            |
+| `cardano_network_agency_violations_total`        | Counter | Protocol agency violations                           |
 
 ---
 
