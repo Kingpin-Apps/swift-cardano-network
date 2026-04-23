@@ -78,9 +78,9 @@ import SwiftCardanoNetwork
 
 try await CardanoNode.withNode(config: .mainnet) { connection in
     // Stream decoded block headers (full bodies require BlockFetch)
-    for try await event in connection.chainSync.followTyped() {
-        if case .rollForward(let block, let tip) = event {
-            print("Block tip=\(tip.blockNo)")
+    for try await event in connection.followTypedHeaders() {
+        if case .rollForward(let header, let tip) = event {
+            print("Slot: \(header.slot), tip: \(tip.blockNo)")
         }
     }
 } // connection closed automatically
@@ -176,7 +176,9 @@ config.protocol.keepAliveTimeoutSeconds  = 10.0
 
 ### ChainSync
 
-Streams chain events as an `AsyncThrowingStream<TypedChainEvent, Error>`. NtC delivers **full decoded blocks**; NtN delivers **decoded block headers** only.
+NtC delivers **full decoded blocks** via `followTyped()`; NtN delivers **decoded block headers** via `followTypedHeaders()`. Both return `AsyncThrowingStream`.
+
+**NtC — full blocks:**
 
 ```swift
 // Follow from the current tip (no intersection point needed)
@@ -191,11 +193,25 @@ let knownPoint = Point.blockPoint(slot: 50_000_000, hash: knownHashBytes)
 for try await event in connection.chainSync.followTyped(from: [knownPoint]) { ... }
 ```
 
-`TypedChainEvent` cases:
-- `.rollForward(Block, Tip)` — new decoded block or header available
+`EraBlockEvent` cases:
+- `.rollForward(Block, Tip)` — new decoded block available
 - `.rollBackward(Point, Tip)` — chain rolled back; resync from `point`
 
 The convenience method `connection.followTyped(from:)` is also available directly on `NodeToClientConnection`.
+
+**NtN — block headers only:**
+
+```swift
+for try await event in connection.chainSync.followTypedHeaders() {
+    if case .rollForward(let header, let tip) = event {
+        print("Slot: \(header.slot), tip: \(tip.blockNo)")
+    }
+}
+```
+
+`TypedHeaderEvent` cases:
+- `.rollForward(BlockHeader, Tip)` — new decoded block header available
+- `.rollBackward(Point, Tip)` — chain rolled back; resync from `point`
 
 Breaking out of a `for try await` loop or cancelling the enclosing `Task` terminates the stream cleanly.
 
@@ -312,6 +328,50 @@ Pull-based transaction propagation with a remote peer. Implement the `TxSubmissi
 ```swift
 try await connection.txSubmission2.run(provider: myMempool)
 ```
+
+### Dummy Protocols (testing / demos)
+
+Two dummy mini-protocols defined in §3.5 of the Ouroboros Network Specification are available for demos and integration tests. They are **not** part of the Node-to-Node or Node-to-Client protocol suites and are reserved on mux IDs `0x7FFE` (Ping-Pong) and `0x7FFD` (Request-Response).
+
+**Ping-Pong** (§3.5.1) — minimal liveness check; the client sends `ping`, the server replies `pong`.
+
+```swift
+let client = PingPongClient(channel: channel, demux: demux)
+try await client.ping()        // single round-trip
+try await client.run(count: 5) // 5 round-trips, then done
+```
+
+**Request-Response** (§3.5.2) — polymorphic single-shot request/reply protocol. Supply a `ReqRespCodec` with encode/decode closures for your payload types, or use `ReqRespCodec<ByteBuffer, ByteBuffer>.raw()` for raw bytes.
+
+```swift
+let client = ReqRespClient<ByteBuffer, ByteBuffer>(
+    channel: channel,
+    demux: demux,
+    codec: ReqRespCodec.raw()
+)
+var req = channel.allocator.buffer(capacity: 4)
+req.writeBytes([0xDE, 0xAD, 0xBE, 0xEF])
+let response = try await client.request(req)
+try await client.done()
+```
+
+**Handshake-less factories** — because the dummy protocols do not require version negotiation, `CardanoNode` exposes factories that skip the Handshake step entirely. NtN additionally skips the background KeepAlive probe loop, since a peer speaking only dummy protocols would not respond to keep-alive probes.
+
+```swift
+// Unix-socket NtC with no handshake
+try await CardanoNode.withClientWithoutHandshake(config: config) { connection in
+    let response = try await connection.requestResponse(
+        request, codec: ReqRespCodec.raw()
+    )
+}
+
+// TCP NtN with no handshake and no KeepAlive
+try await CardanoNode.withNodeWithoutHandshake(config: config) { connection in
+    try await connection.runPingPong(count: 10)
+}
+```
+
+The non-scoped `CardanoNode.connectToClientWithoutHandshake(config:)` and `connectToNodeWithoutHandshake(config:)` variants are also available when you need manual lifetime management.
 
 ---
 

@@ -8,8 +8,8 @@ private let alloc = ByteBufferAllocator()
 private let codec = KeepAliveCodec()
 
 private func roundTrip(_ msg: KeepAliveMessage) throws -> KeepAliveMessage {
-    let buf = try codec.encode(msg, allocator: alloc)
-    return try codec.decode(buf)
+    var buf = try codec.encode(msg, allocator: alloc)
+    return try codec.decode(&buf)
 }
 
 // MARK: - KeepAliveState
@@ -249,7 +249,7 @@ private func roundTrip(_ msg: KeepAliveMessage) throws -> KeepAliveMessage {
         var buf = alloc.buffer(capacity: 3)
         buf.writeBytes([0x81, 0x18, 0x63])
         #expect(throws: (any Error).self) {
-            _ = try codec.decode(buf)
+            _ = try codec.decode(&buf)
         }
     }
 
@@ -258,7 +258,7 @@ private func roundTrip(_ msg: KeepAliveMessage) throws -> KeepAliveMessage {
         var buf = alloc.buffer(capacity: 3)
         buf.writeBytes([0x82, 0x02, 0x00])
         #expect(throws: (any Error).self) {
-            _ = try codec.decode(buf)
+            _ = try codec.decode(&buf)
         }
     }
 
@@ -267,14 +267,14 @@ private func roundTrip(_ msg: KeepAliveMessage) throws -> KeepAliveMessage {
         var buf = alloc.buffer(capacity: 2)
         buf.writeBytes([0x81, 0x00])
         #expect(throws: (any Error).self) {
-            _ = try codec.decode(buf)
+            _ = try codec.decode(&buf)
         }
     }
 
     @Test func emptyBufferThrows() {
-        let buf = alloc.buffer(capacity: 0)
+        var buf = alloc.buffer(capacity: 0)
         #expect(throws: (any Error).self) {
-            _ = try codec.decode(buf)
+            _ = try codec.decode(&buf)
         }
     }
 }

@@ -15,7 +15,7 @@ extension CardanoNetworkConfiguration {
     public static var mainnet: Self {
         var config = Self()
         config.connection.networkMagic = 764_824_073
-        config.connection.host = "relays-new.cardano-mainnet.iohk.io"
+        config.connection.host = "backbone.cardano.iog.io"
         config.connection.port = 3001
         return config
     }

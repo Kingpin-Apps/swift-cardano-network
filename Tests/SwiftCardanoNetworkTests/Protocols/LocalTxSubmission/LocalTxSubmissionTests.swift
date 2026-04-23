@@ -9,8 +9,8 @@ private let alloc = ByteBufferAllocator()
 private let codec = LocalTxSubmissionCodec()
 
 private func roundTrip(_ msg: LocalTxSubmissionMessage) throws -> LocalTxSubmissionMessage {
-    let buf = try codec.encode(msg, allocator: alloc)
-    return try codec.decode(buf)
+    var buf = try codec.encode(msg, allocator: alloc)
+    return try codec.decode(&buf)
 }
 
 private func makeRawTx(era: Era = .conway, bytes: [UInt8] = [0xDE, 0xAD, 0xBE, 0xEF]) -> RawTransaction {
@@ -233,7 +233,7 @@ private func makeRejection(era: Era = .conway, bytes: [UInt8] = [0xBA, 0xD0]) ->
         var buf = alloc.buffer(capacity: 3)
         buf.writeBytes([0x81, 0x18, 0x63])  // [99] in CBOR
         #expect(throws: (any Error).self) {
-            _ = try codec.decode(buf)
+            _ = try codec.decode(&buf)
         }
     }
 
@@ -242,14 +242,14 @@ private func makeRejection(era: Era = .conway, bytes: [UInt8] = [0xBA, 0xD0]) ->
         var buf = alloc.buffer(capacity: 3)
         buf.writeBytes([0x82, 0x01, 0x00])
         #expect(throws: (any Error).self) {
-            _ = try codec.decode(buf)
+            _ = try codec.decode(&buf)
         }
     }
 
     @Test func emptyBufferThrows() {
-        let buf = alloc.buffer(capacity: 0)
+        var buf = alloc.buffer(capacity: 0)
         #expect(throws: (any Error).self) {
-            _ = try codec.decode(buf)
+            _ = try codec.decode(&buf)
         }
     }
 }

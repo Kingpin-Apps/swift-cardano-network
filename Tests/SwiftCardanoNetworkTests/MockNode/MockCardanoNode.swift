@@ -1,9 +1,25 @@
+import Foundation
 import Logging
 import NIOCore
 import NIOExtras
 import NIOPosix
 
 @testable import SwiftCardanoNetwork
+
+// MARK: - Test cleanup helper
+
+/// Shut down an `EventLoopGroup` from within an async test without blocking
+/// the Swift cooperative thread pool.
+///
+/// `sem.wait()` on a cooperative thread exhausts the thread pool when many
+/// tests run in parallel. Instead, we fire the shutdown and let NIO drain its
+/// own threads asynchronously — by the time any subsequent test starts a new
+/// group on the same port (tests use port 0 / random ports), the old group's
+/// channels are already closed via explicit `node.stop()` / `channel.close()`
+/// calls that precede this cleanup.
+func shutdownEventLoopGroup(_ group: EventLoopGroup) {
+    group.shutdownGracefully(queue: .global()) { _ in }
+}
 
 // MARK: - MockNodeConfig
 
@@ -15,6 +31,11 @@ struct MockNodeConfig: Sendable {
     var networkMagic: UInt32 = 764_824_073
     /// Handshake mode (NtN or NtC) the server operates in.
     var handshakeMode: HandshakeCodec.Mode = .nodeToNode
+    /// When `true` (default) the mock server waits for a handshake SDU from
+    /// the client before starting any other mini-protocol handler. Set to
+    /// `false` to skip handshake negotiation entirely — useful for testing
+    /// the dummy protocols (§3.5) which do not require a handshake.
+    var requireHandshake: Bool = true
 
     // MARK: ChainSync
     /// Blocks to stream via ChainSync (`rollForward`), in order.
@@ -53,6 +74,15 @@ struct MockNodeConfig: Sendable {
     // MARK: TxSubmission2
     /// Controls the message sequence the mock server sends as a TxSubmission2 NtN peer.
     var txSubmission2Behavior: TxSubmission2MockBehavior = .doneImmediately
+
+    // MARK: PingPong (dummy, §3.5.1)
+    /// When `true` the mock responds to every `ping` with a `pong` until the client sends `done`.
+    var pingPongEnabled: Bool = true
+
+    // MARK: ReqResp (dummy, §3.5.2)
+    /// Optional handler mapping a raw request buffer to a raw response buffer.
+    /// If `nil`, the mock echoes the request verbatim.
+    var reqRespHandler: (@Sendable (ByteBuffer) -> ByteBuffer)? = nil
 }
 
 // MARK: - TxSubmission2MockBehavior
@@ -67,6 +97,59 @@ enum TxSubmission2MockBehavior: Sendable {
     case requestTxsAndDone(ids: [TxId])
 }
 
+// MARK: - ChildChannelTracker
+
+/// Thread-safe container that tracks every accepted child channel and its
+/// associated `MockServerRunner` task so that `MockCardanoNode.stop()` can:
+///
+/// 1. Close all child channels (causing `channelInactive` → all AsyncStream
+///    continuations finish → runner tasks unblock from `iter.next()`).
+/// 2. Await all runner tasks to completion before the event-loop group is
+///    shut down — preventing "Cannot schedule tasks on an EventLoop that has
+///    already shut down" errors that occur when a runner task wakes up after
+///    shutdown and calls `channel.close(promise:)`.
+private final class ChildChannelTracker: @unchecked Sendable {
+    private let lock = NSLock()
+    private var channels: [ObjectIdentifier: Channel] = [:]
+    private var tasks: [ObjectIdentifier: Task<Void, Never>] = [:]
+
+    func add(_ channel: Channel) {
+        let id = ObjectIdentifier(channel)
+        lock.withLock { channels[id] = channel }
+        channel.closeFuture.whenComplete { [weak self] _ in
+            guard let self else { return }
+            self.lock.withLock { _ = self.channels.removeValue(forKey: id) }
+        }
+    }
+
+    func registerTask(_ task: Task<Void, Never>, for channel: Channel) {
+        let id = ObjectIdentifier(channel)
+        lock.withLock { tasks[id] = task }
+    }
+
+    /// Close every tracked channel concurrently and await completion.
+    func closeAll() async {
+        let snapshot = lock.withLock { Array(channels.values) }
+        await withTaskGroup(of: Void.self) { group in
+            for ch in snapshot {
+                group.addTask {
+                    do { try await ch.close() } catch { /* already closing */  }
+                }
+            }
+        }
+    }
+
+    /// Await every runner task that was registered via `registerTask(_:for:)`.
+    /// Call this AFTER `closeAll()` so that channels are already closed and
+    /// tasks can exit cleanly without blocking.
+    func awaitAllTasks() async {
+        let snapshot = lock.withLock { Array(tasks.values) }
+        for task in snapshot {
+            await task.value
+        }
+    }
+}
+
 // MARK: - MockCardanoNode
 
 /// Lightweight in-process Cardano node stub for integration tests.
@@ -75,48 +158,116 @@ enum TxSubmission2MockBehavior: Sendable {
 /// time. Protocol responses are fully controlled by `MockNodeConfig`.
 ///
 /// ```swift
+/// let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+/// defer { shutdownEventLoopGroup(group) }
 /// let node = try await MockCardanoNode(config: config, group: group)
-/// defer { Task { try? await node.stop() } }
 ///
 /// let port = await node.port
 /// ```
+///
+/// For NtC-style tests, `MockCardanoNode(unixSocketPath:config:group:)` binds
+/// to a Unix domain socket instead of a TCP port.
 actor MockCardanoNode {
 
+    /// TCP port the server is bound to. `0` when bound to a Unix socket.
     let port: Int
+    /// Unix socket path the server is bound to, or `nil` when using TCP.
+    let unixSocketPath: String?
     private let serverChannel: Channel
+    private let childTracker: ChildChannelTracker
 
     init(config: MockNodeConfig = MockNodeConfig(), group: EventLoopGroup) async throws {
         let logger = Logger(label: "test.mock-node")
+        let tracker = ChildChannelTracker()
 
         let channel = try await ServerBootstrap(group: group)
             .serverChannelOption(ChannelOptions.backlog, value: 4)
             .serverChannelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
             .childChannelInitializer { ch in
-                let demux = DemuxHandler(logger: logger)
-                let handler = MockServerChannelHandler(config: config, demux: demux, logger: logger)
-                do {
-                    try ch.pipeline.syncOperations.addHandlers([
-                        MessageToByteHandler(MuxFrameEncoder()),
-                        ByteToMessageHandler(
-                            MuxFrameDecoder(maxPayloadSize: 65_535, logger: logger)
-                        ),
-                        demux,
-                        handler,
-                    ])
-                    return ch.eventLoop.makeSucceededVoidFuture()
-                } catch {
-                    return ch.eventLoop.makeFailedFuture(error)
-                }
+                tracker.add(ch)
+                return MockCardanoNode.installPipeline(
+                    on: ch, config: config, tracker: tracker, logger: logger)
             }
             .bind(host: "127.0.0.1", port: 0)
             .get()
 
         self.serverChannel = channel
+        self.childTracker = tracker
         self.port = channel.localAddress!.port!
+        self.unixSocketPath = nil
+    }
+
+    /// Bind the mock to a Unix domain socket at `path` instead of TCP.
+    ///
+    /// If a file already exists at `path` it is unlinked first so that repeated
+    /// test runs succeed. Callers should remove the file in their test teardown
+    /// to keep `/tmp` clean.
+    init(
+        unixSocketPath path: String,
+        config: MockNodeConfig = MockNodeConfig(),
+        group: EventLoopGroup
+    ) async throws {
+        let logger = Logger(label: "test.mock-node")
+        // Clean up any stale socket from a previous test run.
+        try? FileManager.default.removeItem(atPath: path)
+        let tracker = ChildChannelTracker()
+
+        let channel = try await ServerBootstrap(group: group)
+            .serverChannelOption(ChannelOptions.backlog, value: 4)
+            .childChannelInitializer { ch in
+                tracker.add(ch)
+                return MockCardanoNode.installPipeline(
+                    on: ch, config: config, tracker: tracker, logger: logger)
+            }
+            .bind(unixDomainSocketPath: path, cleanupExistingSocketFile: true)
+            .get()
+
+        self.serverChannel = channel
+        self.childTracker = tracker
+        self.port = 0
+        self.unixSocketPath = path
+    }
+
+    /// Shared pipeline-installation helper used by both TCP and Unix socket inits.
+    private static func installPipeline(
+        on channel: Channel,
+        config: MockNodeConfig,
+        tracker: ChildChannelTracker,
+        logger: Logger
+    ) -> EventLoopFuture<Void> {
+        let demux = DemuxHandler(logger: logger)
+        let handler = MockServerChannelHandler(
+            config: config, demux: demux, tracker: tracker, logger: logger)
+        do {
+            try channel.pipeline.syncOperations.addHandlers([
+                MessageToByteHandler(MuxFrameEncoder()),
+                ByteToMessageHandler(
+                    MuxFrameDecoder(maxPayloadSize: 65_535, logger: logger)
+                ),
+                demux,
+                handler,
+            ])
+            return channel.eventLoop.makeSucceededVoidFuture()
+        } catch {
+            return channel.eventLoop.makeFailedFuture(error)
+        }
     }
 
     func stop() async throws {
+        // 1. Close all accepted child channels — triggers `channelInactive` on
+        //    each, which finishes all DemuxHandler streams and unblocks every
+        //    `await iter.next()` inside the MockServerRunner tasks.
+        await childTracker.closeAll()
+        // 2. Wait for every runner Task to actually finish before proceeding.
+        //    Without this, a runner task can wake up after the event-loop group
+        //    is shut down and call `channel.close(promise:)`, causing:
+        //    "Cannot schedule tasks on an EventLoop that has already shut down."
+        await childTracker.awaitAllTasks()
+        // 3. Close the listening socket.
         try await serverChannel.close()
+        if let path = unixSocketPath {
+            try? FileManager.default.removeItem(atPath: path)
+        }
     }
 }
 
@@ -129,11 +280,18 @@ private final class MockServerChannelHandler: ChannelInboundHandler, @unchecked 
 
     private let config: MockNodeConfig
     private let demux: DemuxHandler
+    private let tracker: ChildChannelTracker
     private let logger: Logger
 
-    init(config: MockNodeConfig, demux: DemuxHandler, logger: Logger) {
+    init(
+        config: MockNodeConfig,
+        demux: DemuxHandler,
+        tracker: ChildChannelTracker,
+        logger: Logger
+    ) {
         self.config = config
         self.demux = demux
+        self.tracker = tracker
         self.logger = logger
     }
 
@@ -141,7 +299,7 @@ private final class MockServerChannelHandler: ChannelInboundHandler, @unchecked 
         let channel = context.channel
         let runner = MockServerRunner(
             config: config, demux: demux, channel: channel, logger: logger)
-        Task {
+        let task = Task<Void, Never> {
             do {
                 try await runner.run()
             } catch {
@@ -149,6 +307,7 @@ private final class MockServerChannelHandler: ChannelInboundHandler, @unchecked 
                 channel.close(promise: nil)
             }
         }
+        tracker.registerTask(task, for: channel)
         context.fireChannelActive()
     }
 
@@ -183,6 +342,8 @@ private struct MockServerRunner: Sendable {
     private let keepAliveStream: AsyncStream<MuxSDU>
     private let blockFetchStream: AsyncStream<MuxSDU>
     private let txSubmission2Stream: AsyncStream<MuxSDU>
+    private let pingPongStream: AsyncStream<MuxSDU>
+    private let reqRespStream: AsyncStream<MuxSDU>
 
     /// Must be called synchronously on the NIO event-loop thread (e.g. from
     /// `channelActive`) so that all registrations complete before any
@@ -201,11 +362,15 @@ private struct MockServerRunner: Sendable {
         self.keepAliveStream = demux.register(protocolID: MuxSDU.ProtocolID.keepAlive)
         self.blockFetchStream = demux.register(protocolID: MuxSDU.ProtocolID.blockFetch)
         self.txSubmission2Stream = demux.register(protocolID: MuxSDU.ProtocolID.txSubmission2)
+        self.pingPongStream = demux.register(protocolID: MuxSDU.ProtocolID.pingPong)
+        self.reqRespStream = demux.register(protocolID: MuxSDU.ProtocolID.reqResp)
     }
 
     func run() async throws {
-        // Handshake must complete before anything else.
-        try await handleHandshake()
+        // Handshake must complete before anything else (if required).
+        if config.requireHandshake {
+            try await handleHandshake()
+        }
 
         // All other protocols run concurrently; errors are ignored per-protocol
         // so that one stalled handler doesn't block the others.
@@ -217,6 +382,8 @@ private struct MockServerRunner: Sendable {
             group.addTask { try? await self.handleKeepAlive() }
             group.addTask { try? await self.handleBlockFetch() }
             group.addTask { try? await self.handleTxSubmission2() }
+            group.addTask { try? await self.handlePingPong() }
+            group.addTask { try? await self.handleReqResp() }
         }
     }
 
@@ -241,7 +408,8 @@ private struct MockServerRunner: Sendable {
         guard let sdu = await iter.next() else { return }
 
         let codec = HandshakeCodec(mode: config.handshakeMode)
-        guard case .proposeVersions(let proposals) = try codec.decode(sdu.payload) else { return }
+        var payload = sdu.payload
+        guard case .proposeVersions(let proposals) = try codec.decode(&payload) else { return }
 
         // Accept the highest mutually supported version.
         let supported: Set<UInt16> = [7, 8, 9, 10, 11, 12, 13, 14]
@@ -249,7 +417,9 @@ private struct MockServerRunner: Sendable {
 
         let vd: HandshakeVersionData =
             config.handshakeMode == .nodeToNode
-            ? .nodeToNode(networkMagic: config.networkMagic, initiatorOnly: false, peerSharing: nil, query: nil)
+            ? .nodeToNode(
+                networkMagic: config.networkMagic, initiatorOnly: false, peerSharing: nil,
+                query: nil)
             : .nodeToClient(networkMagic: config.networkMagic)
 
         try await send(
@@ -265,7 +435,8 @@ private struct MockServerRunner: Sendable {
         var blockIdx = 0
 
         while let sdu = await iter.next() {
-            switch try codec.decode(sdu.payload) {
+            var payload = sdu.payload
+            switch try codec.decode(&payload) {
             case .findIntersect:
                 try await send(
                     .intersectNotFound(config.chainSyncTip),
@@ -306,7 +477,8 @@ private struct MockServerRunner: Sendable {
         var iter = localTxSubmissionStream.makeAsyncIterator()
 
         while let sdu = await iter.next() {
-            switch try codec.decode(sdu.payload) {
+            var payload = sdu.payload
+            switch try codec.decode(&payload) {
             case .submitTx:
                 if config.acceptTransactions {
                     try await send(
@@ -336,7 +508,8 @@ private struct MockServerRunner: Sendable {
         var iter = localStateQueryStream.makeAsyncIterator()
 
         while let sdu = await iter.next() {
-            switch try codec.decode(sdu.payload) {
+            var payload = sdu.payload
+            switch try codec.decode(&payload) {
             case .acquire, .acquireVolatileTip, .reAcquire:
                 try await send(
                     .acquired, codec: codec, protocolID: MuxSDU.ProtocolID.localStateQuery)
@@ -367,7 +540,8 @@ private struct MockServerRunner: Sendable {
         var acquired = false
 
         while let sdu = await iter.next() {
-            switch try codec.decode(sdu.payload) {
+            var payload = sdu.payload
+            switch try codec.decode(&payload) {
             case .acquire:
                 txIdx = 0
                 acquired = true
@@ -428,7 +602,8 @@ private struct MockServerRunner: Sendable {
         var iter = blockFetchStream.makeAsyncIterator()
 
         while let sdu = await iter.next() {
-            switch try codec.decode(sdu.payload) {
+            var payload = sdu.payload
+            switch try codec.decode(&payload) {
             case .requestRange:
                 if config.blockFetchBlocks.isEmpty {
                     try await send(
@@ -490,12 +665,61 @@ private struct MockServerRunner: Sendable {
         var iter = keepAliveStream.makeAsyncIterator()
 
         while let sdu = await iter.next() {
-            switch try codec.decode(sdu.payload) {
+            var payload = sdu.payload
+            switch try codec.decode(&payload) {
             case .keepAlive(let cookie):
                 try await send(
                     .keepAliveResponse(cookie: cookie),
                     codec: codec,
                     protocolID: MuxSDU.ProtocolID.keepAlive
+                )
+
+            case .done:
+                return
+
+            default:
+                break
+            }
+        }
+    }
+
+    // MARK: - PingPong (dummy, §3.5.1)
+
+    private func handlePingPong() async throws {
+        guard config.pingPongEnabled else { return }
+        let codec = PingPongCodec()
+        var iter = pingPongStream.makeAsyncIterator()
+
+        while let sdu = await iter.next() {
+            var payload = sdu.payload
+            switch try codec.decode(&payload) {
+            case .ping:
+                try await send(.pong, codec: codec, protocolID: MuxSDU.ProtocolID.pingPong)
+
+            case .done:
+                return
+
+            default:
+                break
+            }
+        }
+    }
+
+    // MARK: - ReqResp (dummy, §3.5.2)
+
+    private func handleReqResp() async throws {
+        let codec = ReqRespCodec<ByteBuffer, ByteBuffer>.raw()
+        var iter = reqRespStream.makeAsyncIterator()
+
+        while let sdu = await iter.next() {
+            var payloadBuf = sdu.payload
+            switch try codec.decode(&payloadBuf) {
+            case .request(let payload):
+                let response = config.reqRespHandler?(payload) ?? payload
+                try await send(
+                    .response(response),
+                    codec: codec,
+                    protocolID: MuxSDU.ProtocolID.reqResp
                 )
 
             case .done:

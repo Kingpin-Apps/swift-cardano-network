@@ -39,7 +39,7 @@ import Testing
     @Test("connect(): throws missingSocketPath when socketPath is nil")
     func connectThrowsMissingSocketPath() async {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         var conn = ConnectionConfig()
         conn.socketPath = nil  // explicit nil — default behaviour
@@ -63,7 +63,7 @@ import Testing
     @Test("connect(): throws missingSocketPath regardless of other config fields")
     func connectThrowsMissingSocketPathWithOtherFieldsSet() async {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         var conn = ConnectionConfig()
         conn.socketPath = nil
@@ -87,7 +87,7 @@ import Testing
     @Test("connect(): throws missingSocketPath when socketPath is empty string")
     func connectToEmptySocketPath() async {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         var conn = ConnectionConfig()
         conn.socketPath = "/this/socket/does/not/exist.socket"
@@ -110,7 +110,7 @@ import Testing
     @Test("connect(): throws a network error when the target port refuses connections")
     func connectFailsOnRefusedPort() async throws {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         // Bind to a random port, capture it, then immediately close the listener
         // so the port is guaranteed to be closed when TCPTransport tries to connect.
@@ -134,7 +134,7 @@ import Testing
     @Test("connect(): succeeds and returns a valid channel when a server is listening")
     func connectSucceedsWithServer() async throws {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         // Minimal echo server — just accepts the connection.
         let server = try await ServerBootstrap(group: group)
@@ -142,7 +142,6 @@ import Testing
             .bind(host: "127.0.0.1", port: 0)
             .get()
         let port = server.localAddress!.port!
-        defer { Task { try? await server.close() } }
 
         var conn = ConnectionConfig()
         conn.host = "127.0.0.1"
@@ -150,22 +149,23 @@ import Testing
 
         let transport = TCPTransport(config: conn, protocolConfig: ProtocolConfig(), group: group)
         let (channel, _) = try await transport.connect()
-        defer { Task { try? await channel.close() } }
 
         #expect(channel.isActive)
+
+        try? await channel.close()
+        try? await server.close()
     }
 
     @Test("connect(): returns a channel with the mux pipeline installed")
     func connectInstallsMuxPipeline() async throws {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let server = try await ServerBootstrap(group: group)
             .serverChannelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
             .bind(host: "127.0.0.1", port: 0)
             .get()
         let port = server.localAddress!.port!
-        defer { Task { try? await server.close() } }
 
         var conn = ConnectionConfig()
         conn.host = "127.0.0.1"
@@ -173,7 +173,6 @@ import Testing
 
         let transport = TCPTransport(config: conn, protocolConfig: ProtocolConfig(), group: group)
         let (channel, _) = try await transport.connect()
-        defer { Task { try? await channel.close() } }
 
         // The pipeline must contain the MuxFrameEncoder/Decoder installed by TCPTransport.
         let hasMuxDecoder = try await channel.pipeline.context(
@@ -184,5 +183,8 @@ import Testing
         .get()
 
         #expect(hasMuxDecoder)
+
+        try? await channel.close()
+        try? await server.close()
     }
 }

@@ -89,14 +89,13 @@ struct PreviewNetworkIntegrationTests {
     @Test("Handshake: negotiates a supported NtN version with preview magic")
     func handshakeNegotiatesVersion() async throws {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let (channel, demux) = try await TCPTransport(
             config: previewConnectionConfig(),
             protocolConfig: ProtocolConfig(),
             group: group
         ).connect()
-        defer { Task { try? await channel.close() } }
 
         let negotiated = try await HandshakeClient(
             channel: channel,
@@ -121,7 +120,7 @@ struct PreviewNetworkIntegrationTests {
     @Test("CardanoNode.connectToNode: factory connects and negotiates with preview config")
     func cardanoNodeFactoryConnects() async throws {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         var config = CardanoNetworkConfiguration()
         config.connection = previewConnectionConfig()
@@ -139,13 +138,14 @@ struct PreviewNetworkIntegrationTests {
     @Test("ChainSync: receives at least one rollForward event from tip within 60 seconds")
     func chainSyncReceivesBlockFromTip() async throws {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let (channel, demux) = try await connectAndHandshakePreview(group: group)
-        defer { Task { try? await channel.close() } }
 
         // Follow from an empty point list ⟹ start from the node's current tip.
-        let stream = ChainSyncClient(channel: channel, demux: demux).follow(from: [])
+        let stream: AsyncThrowingStream<ChainEvent, Error> = ChainSyncClient(
+            channel: channel, demux: demux
+        ).follow(from: [])
 
         // Collect the first event, honouring a 60-second deadline.
         let firstEvent = try await withThrowingTaskGroup(of: ChainEvent?.self) { group in
@@ -192,17 +192,18 @@ struct PreviewNetworkIntegrationTests {
     @Test("ChainSync: intersection not found for unknown point on preview")
     func chainSyncIntersectNotFoundOnPreview() async throws {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let (channel, demux) = try await connectAndHandshakePreview(group: group)
-        defer { Task { try? await channel.close() } }
 
         // A block hash of all 0xFF bytes is astronomically unlikely to exist.
         let bogusPoint = Point.blockPoint(
             slot: 1,
             hash: Array(repeating: 0xFF, count: 32)
         )
-        let stream = ChainSyncClient(channel: channel, demux: demux).follow(from: [bogusPoint])
+        let stream: AsyncThrowingStream<ChainEvent, Error> = ChainSyncClient(
+            channel: channel, demux: demux
+        ).follow(from: [bogusPoint])
 
         do {
             for try await _ in stream { break }
@@ -223,7 +224,7 @@ struct PreviewNetworkIntegrationTests {
     @Test("KeepAlive: connection remains active after handshake via factory")
     func keepAliveConnectionRemainsActive() async throws {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         var config = CardanoNetworkConfiguration()
         config.connection = previewConnectionConfig()

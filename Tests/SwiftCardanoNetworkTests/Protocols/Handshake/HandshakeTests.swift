@@ -99,8 +99,8 @@ import NIOCore
     private let alloc = ByteBufferAllocator()
 
     private func roundTrip(_ msg: HandshakeMessage) throws -> HandshakeMessage {
-        let buf = try codec.encode(msg, allocator: alloc)
-        return try codec.decode(buf)
+        var buf = try codec.encode(msg, allocator: alloc)
+        return try codec.decode(&buf)
     }
 
     @Test func proposeVersionsRoundTrip() throws {
@@ -190,8 +190,8 @@ import NIOCore
     private let alloc = ByteBufferAllocator()
 
     private func roundTrip(_ msg: HandshakeMessage) throws -> HandshakeMessage {
-        let buf = try codec.encode(msg, allocator: alloc)
-        return try codec.decode(buf)
+        var buf = try codec.encode(msg, allocator: alloc)
+        return try codec.decode(&buf)
     }
 
     @Test func proposeVersionsRoundTrip() throws {

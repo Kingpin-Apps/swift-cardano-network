@@ -90,12 +90,10 @@ struct LocalTxSubmissionClientTypedSubmitTests {
         config.acceptTransactions = true
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
         let node = try await MockCardanoNode(config: config, group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, demux) = try await connectAndHandshakeNtN(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         // Confirm the raw submit path works (covers the non-typed submit).
         var buf = alloc.buffer(capacity: 4)
@@ -103,6 +101,9 @@ struct LocalTxSubmissionClientTypedSubmitTests {
         let rawTx = RawTransaction(era: .conway, rawCBOR: buf)
         let client = LocalTxSubmissionClient(channel: channel, demux: demux)
         try await client.submit(rawTx)
+
+        try? await channel.close()
+        try? await node.stop()
     }
 
     @Test("submit(RawTransaction): rejected by mock node throws .rejected")
@@ -111,12 +112,10 @@ struct LocalTxSubmissionClientTypedSubmitTests {
         config.acceptTransactions = false
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
         let node = try await MockCardanoNode(config: config, group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, demux) = try await connectAndHandshakeNtN(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         var buf = alloc.buffer(capacity: 2)
         buf.writeBytes([0x01, 0x02])
@@ -128,6 +127,9 @@ struct LocalTxSubmissionClientTypedSubmitTests {
         } catch LocalTxSubmissionError.rejected(let rejection) {
             #expect(rejection.era == .conway)
         }
+
+        try? await channel.close()
+        try? await node.stop()
     }
 
     // MARK: - Typed Transaction helpers
@@ -155,16 +157,17 @@ struct LocalTxSubmissionClientTypedSubmitTests {
         config.acceptTransactions = true
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
         let node = try await MockCardanoNode(config: config, group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, demux) = try await connectAndHandshakeNtN(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         let tx = try makeMinimalTransaction()
         let client = LocalTxSubmissionClient(channel: channel, demux: demux)
         try await client.submit(tx)
+
+        try? await channel.close()
+        try? await node.stop()
     }
 
     @Test("submitChecked(Transaction): returns TransactionId when mock accepts")
@@ -173,16 +176,17 @@ struct LocalTxSubmissionClientTypedSubmitTests {
         config.acceptTransactions = true
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
         let node = try await MockCardanoNode(config: config, group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, demux) = try await connectAndHandshakeNtN(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         let tx = try makeMinimalTransaction()
         let client = LocalTxSubmissionClient(channel: channel, demux: demux)
         let returnedId = try await client.submitChecked(tx)
         #expect(returnedId == tx.id!)
+
+        try? await channel.close()
+        try? await node.stop()
     }
 }

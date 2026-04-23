@@ -1,8 +1,9 @@
-import Testing
+import Logging
 import NIOCore
 import NIOPosix
-import Logging
 import SwiftCardanoCore
+import Testing
+
 @testable import SwiftCardanoNetwork
 
 // MARK: - Helpers
@@ -53,7 +54,7 @@ private func connectAndHandshake(
         demux: demux,
         config: ProtocolConfig(),
         mode: .nodeToNode
-    ).negotiate(networkMagic: 764824073)
+    ).negotiate(networkMagic: 764_824_073)
 
     return (channel, demux)
 }
@@ -72,10 +73,9 @@ struct IntegrationTests {
     @Test("Handshake: negotiates highest mutual version")
     func handshakeNegotiatesVersion() async throws {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let node = try await MockCardanoNode(group: group)
-        defer { Task { try? await node.stop() } }
 
         var conn = ConnectionConfig()
         conn.host = "127.0.0.1"
@@ -86,20 +86,20 @@ struct IntegrationTests {
             protocolConfig: ProtocolConfig(),
             group: group
         ).connect()
-        defer { Task { try? await channel.close() } }
 
         let negotiated = try await HandshakeClient(
             channel: channel,
             demux: demux,
             config: ProtocolConfig(),
             mode: .nodeToNode
-        ).negotiate(networkMagic: 764824073)
+        ).negotiate(networkMagic: 764_824_073)
 
         #expect(negotiated.version == 14)
         guard case .nodeToNode(let magic, _, _, _) = negotiated.versionData else {
-            Issue.record("Expected NtN version data"); return
+            Issue.record("Expected NtN version data")
+            return
         }
-        #expect(magic == 764824073)
+        #expect(magic == 764_824_073)
     }
 
     // MARK: - ChainSync
@@ -111,18 +111,19 @@ struct IntegrationTests {
             makeRawBlock(era: 5, bytes: [0x01]),
             makeRawBlock(era: 6, bytes: [0x02, 0x03]),
         ]
-        config.chainSyncTip = Tip(point: .blockPoint(slot: 200, hash: Array(repeating: 0xAA, count: 32)), blockNo: 2)
+        config.chainSyncTip = Tip(
+            point: .blockPoint(slot: 200, hash: Array(repeating: 0xAA, count: 32)), blockNo: 2)
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let node = try await MockCardanoNode(config: config, group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, demux) = try await connectAndHandshake(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
-        let stream = ChainSyncClient(channel: channel, demux: demux).follow(from: [])
+        let stream: AsyncThrowingStream<ChainEvent, Error> = ChainSyncClient(
+            channel: channel, demux: demux
+        ).follow(from: [])
         var received: [ChainEvent] = []
 
         for try await event in stream {
@@ -133,13 +134,15 @@ struct IntegrationTests {
         #expect(received.count == 2)
 
         guard case .rollForward(let block1, _) = received[0] else {
-            Issue.record("Expected rollForward[0]"); return
+            Issue.record("Expected rollForward[0]")
+            return
         }
         #expect(block1.era == 5)
         #expect(block1.rawCBOR.readableBytes == 1)
 
         guard case .rollForward(let block2, _) = received[1] else {
-            Issue.record("Expected rollForward[1]"); return
+            Issue.record("Expected rollForward[1]")
+            return
         }
         #expect(block2.era == 6)
         #expect(block2.rawCBOR.readableBytes == 2)
@@ -148,16 +151,16 @@ struct IntegrationTests {
     @Test("ChainSync: intersection not found when starting from unknown point")
     func chainSyncIntersectNotFound() async throws {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let node = try await MockCardanoNode(group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, demux) = try await connectAndHandshake(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         let knownPoint = Point.blockPoint(slot: 9_999_999, hash: Array(repeating: 0xFF, count: 32))
-        let stream = ChainSyncClient(channel: channel, demux: demux).follow(from: [knownPoint])
+        let stream: AsyncThrowingStream<ChainEvent, Error> = ChainSyncClient(
+            channel: channel, demux: demux
+        ).follow(from: [knownPoint])
 
         do {
             for try await _ in stream { break }
@@ -171,19 +174,19 @@ struct IntegrationTests {
     @Test("ChainSync: empty block list yields awaitReply without crash")
     func chainSyncAwaitReply() async throws {
         var config = MockNodeConfig()
-        config.chainSyncBlocks = []   // no blocks → server sends awaitReply
+        config.chainSyncBlocks = []  // no blocks → server sends awaitReply
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let node = try await MockCardanoNode(config: config, group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, demux) = try await connectAndHandshake(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         // Collect events with a short timeout — none should arrive.
-        let stream = ChainSyncClient(channel: channel, demux: demux).follow(from: [])
+        let stream: AsyncThrowingStream<ChainEvent, Error> = ChainSyncClient(
+            channel: channel, demux: demux
+        ).follow(from: [])
         let receiveTask = Task {
             var count = 0
             for try await _ in stream {
@@ -208,13 +211,11 @@ struct IntegrationTests {
         config.acceptTransactions = true
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let node = try await MockCardanoNode(config: config, group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, demux) = try await connectAndHandshake(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         let client = LocalTxSubmissionClient(channel: channel, demux: demux)
         try await client.submit(makeRawTx(era: .conway, bytes: [0xDE, 0xAD, 0xBE, 0xEF]))
@@ -227,13 +228,11 @@ struct IntegrationTests {
         config.acceptTransactions = false
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let node = try await MockCardanoNode(config: config, group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, demux) = try await connectAndHandshake(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         let client = LocalTxSubmissionClient(channel: channel, demux: demux)
         do {
@@ -247,13 +246,11 @@ struct IntegrationTests {
     @Test("LocalTxSubmission: multiple sequential submissions each succeed")
     func localTxSubmissionMultiple() async throws {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let node = try await MockCardanoNode(group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, demux) = try await connectAndHandshake(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         let client = LocalTxSubmissionClient(channel: channel, demux: demux)
         for i in 0..<3 {
@@ -267,17 +264,15 @@ struct IntegrationTests {
     func localStateQueryReturnsResult() async throws {
         var config = MockNodeConfig()
         var resultBuf = alloc.buffer(capacity: 3)
-        resultBuf.writeBytes([0x83, 0x01, 0x02])   // CBOR [1, 2]
+        resultBuf.writeBytes([0x83, 0x01, 0x02])  // CBOR [1, 2]
         config.queryResult = RawResult(era: 6, rawCBOR: resultBuf)
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let node = try await MockCardanoNode(config: config, group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, demux) = try await connectAndHandshake(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         let client = LocalStateQueryClient(channel: channel, demux: demux)
         let result = try await client.query(.raw(makeRawQuery()))
@@ -289,13 +284,11 @@ struct IntegrationTests {
     @Test("LocalStateQuery: query at volatile tip succeeds")
     func localStateQueryAtVolatileTip() async throws {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let node = try await MockCardanoNode(group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, demux) = try await connectAndHandshake(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         let client = LocalStateQueryClient(channel: channel, demux: demux)
         let result = try await client.query(.raw(makeRawQuery()), at: .volatileTip)
@@ -306,17 +299,16 @@ struct IntegrationTests {
     @Test("LocalStateQuery: query at specific chain point succeeds")
     func localStateQueryAtSpecificPoint() async throws {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let node = try await MockCardanoNode(group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, demux) = try await connectAndHandshake(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
-        let client  = LocalStateQueryClient(channel: channel, demux: demux)
-        let point   = AcquirePoint.specific(.blockPoint(slot: 1_000, hash: Array(repeating: 0x11, count: 32)))
-        let result  = try await client.query(.raw(makeRawQuery()), at: point)
+        let client = LocalStateQueryClient(channel: channel, demux: demux)
+        let point = AcquirePoint.specific(
+            .blockPoint(slot: 1_000, hash: Array(repeating: 0x11, count: 32)))
+        let result = try await client.query(.raw(makeRawQuery()), at: point)
 
         #expect(result.rawCBOR.readableBytes > 0)
     }
@@ -324,18 +316,16 @@ struct IntegrationTests {
     @Test("LocalStateQuery: multiple sequential queries on same connection succeed")
     func localStateQueryMultiple() async throws {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let node = try await MockCardanoNode(group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, demux) = try await connectAndHandshake(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         let client = LocalStateQueryClient(channel: channel, demux: demux)
         for era in [UInt16(4), 5, 6] {
             let r = try await client.query(.raw(makeRawQuery(era: era)))
-            #expect(r.era == 6)   // mock always returns era 6
+            #expect(r.era == 6)  // mock always returns era 6
         }
     }
 
@@ -344,21 +334,19 @@ struct IntegrationTests {
     @Test("LocalTxMonitor: snapshot returns correct slot and transaction count")
     func localTxMonitorSnapshot() async throws {
         var config = MockNodeConfig()
-        config.mempoolSlot  = 77_777
-        config.mempoolTxs   = [
+        config.mempoolSlot = 77_777
+        config.mempoolTxs = [
             makeMempoolTx(bytes: [0x01, 0x02]),
             makeMempoolTx(bytes: [0x03, 0x04]),
             makeMempoolTx(bytes: [0x05]),
         ]
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let node = try await MockCardanoNode(config: config, group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, demux) = try await connectAndHandshake(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         let client = LocalTxMonitorClient(channel: channel, demux: demux)
         let (slotNo, txs) = try await client.snapshot()
@@ -372,19 +360,18 @@ struct IntegrationTests {
     @Test("LocalTxMonitor: empty mempool returns zero transactions")
     func localTxMonitorEmptyMempool() async throws {
         var config = MockNodeConfig()
-        config.mempoolTxs  = []
+        config.mempoolTxs = []
         config.mempoolSlot = 1
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let node = try await MockCardanoNode(config: config, group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, demux) = try await connectAndHandshake(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
-        let (slotNo, txs) = try await LocalTxMonitorClient(channel: channel, demux: demux).snapshot()
+        let (slotNo, txs) = try await LocalTxMonitorClient(channel: channel, demux: demux)
+            .snapshot()
         #expect(slotNo == 1)
         #expect(txs.isEmpty)
     }
@@ -399,18 +386,16 @@ struct IntegrationTests {
         )
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let node = try await MockCardanoNode(config: config, group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, demux) = try await connectAndHandshake(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         let cap = try await LocalTxMonitorClient(channel: channel, demux: demux).sizes()
         #expect(cap.capacityInBytes == 131_072)
-        #expect(cap.sizeInBytes     == 4_096)
-        #expect(cap.numberOfTxs     == 7)
+        #expect(cap.sizeInBytes == 4_096)
+        #expect(cap.numberOfTxs == 7)
     }
 
     @Test("LocalTxMonitor: hasTx returns false for unknown transaction")
@@ -419,16 +404,15 @@ struct IntegrationTests {
         config.mempoolTxs = []
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let node = try await MockCardanoNode(config: config, group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, demux) = try await connectAndHandshake(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         let unknownTxId: TxId = Array(repeating: 0xDE, count: 32)
-        let present = try await LocalTxMonitorClient(channel: channel, demux: demux).hasTx(unknownTxId)
+        let present = try await LocalTxMonitorClient(channel: channel, demux: demux).hasTx(
+            unknownTxId)
         #expect(present == false)
     }
 
@@ -437,20 +421,18 @@ struct IntegrationTests {
     @Test("KeepAlive: probe receives matching cookie response")
     func keepAliveProbeRoundTrip() async throws {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let node = try await MockCardanoNode(group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, demux) = try await connectAndHandshake(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         // Use a very short interval so the first probe fires quickly,
         // then cancel the task after it completes.
         let handler = KeepAliveHandler(
             channel: channel,
             demux: demux,
-            intervalSeconds: 0.001,   // 1 ms
+            intervalSeconds: 0.001,  // 1 ms
             timeoutSeconds: 5.0,
             logger: Logger(label: "test.keepalive")
         )
@@ -458,7 +440,7 @@ struct IntegrationTests {
         let task = Task { try await handler.run() }
 
         // Allow time for at least one probe/response round-trip.
-        try await Task.sleep(nanoseconds: 300_000_000)   // 300 ms
+        try await Task.sleep(nanoseconds: 300_000_000)  // 300 ms
         task.cancel()
 
         // Accept CancellationError (clean exit); any other error is a test failure.
@@ -474,21 +456,19 @@ struct IntegrationTests {
     @Test("Multi-protocol: handshake + txSubmit + query on same connection")
     func multiProtocolSingleConnection() async throws {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let node = try await MockCardanoNode(group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, demux) = try await connectAndHandshake(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         // Tx submission
         let txClient = LocalTxSubmissionClient(channel: channel, demux: demux)
         try await txClient.submit(makeRawTx())
 
         // Ledger query
-        let qClient  = LocalStateQueryClient(channel: channel, demux: demux)
-        let result   = try await qClient.query(.raw(makeRawQuery()))
+        let qClient = LocalStateQueryClient(channel: channel, demux: demux)
+        let result = try await qClient.query(.raw(makeRawQuery()))
         #expect(result.era == 6)
 
         // Mempool snapshot

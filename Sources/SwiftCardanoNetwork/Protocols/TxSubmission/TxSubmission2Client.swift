@@ -1,6 +1,6 @@
-import NIOCore
 import Logging
 import Metrics
+import NIOCore
 
 /// A provider of transactions that `TxSubmission2Client` calls when the remote
 /// node requests IDs or bodies.
@@ -55,6 +55,17 @@ public struct TxSubmission2Client: Sendable {
     private let channel: Channel
     private let demux: DemuxHandler
     private let logger: Logger
+    /// Eagerly registered inbound stream.
+    ///
+    /// TxSubmission2 has **server agency** — the remote node sends the very
+    /// first message (`requestTxIds`, `requestTxs`, or `done`) immediately
+    /// after the handshake, without waiting for any client message.  If the
+    /// stream were registered lazily inside `run(provider:)`, that first SDU
+    /// can arrive at the `DemuxHandler` before the registration exists and
+    /// would be silently dropped, causing `run()` to hang forever.  Registering
+    /// eagerly here — at `NodeToNodeConnection` construction time, right after
+    /// the handshake — ensures no SDU is missed.
+    private let inboundStream: AsyncStream<MuxSDU>
 
     public init(
         channel: Channel,
@@ -64,6 +75,7 @@ public struct TxSubmission2Client: Sendable {
         self.channel = channel
         self.demux = demux
         self.logger = logger
+        self.inboundStream = demux.register(protocolID: MuxSDU.ProtocolID.txSubmission2)
     }
 
     // MARK: - Public API
@@ -86,11 +98,13 @@ public struct TxSubmission2Client: Sendable {
 
             switch request {
             case .requestTxIds(let blocking, let ackCount, let reqCount):
-                logger.debug("TxSubmission2: requestTxIds", metadata: [
-                    "blocking":  "\(blocking)",
-                    "ackCount":  "\(ackCount)",
-                    "reqCount":  "\(reqCount)"
-                ])
+                logger.debug(
+                    "TxSubmission2: requestTxIds",
+                    metadata: [
+                        "blocking": "\(blocking)",
+                        "ackCount": "\(ackCount)",
+                        "reqCount": "\(reqCount)",
+                    ])
 
                 let entries = try await provider.requestTxIds(
                     blocking: blocking,
@@ -98,9 +112,11 @@ public struct TxSubmission2Client: Sendable {
                     reqCount: reqCount
                 )
 
-                logger.debug("TxSubmission2: replyTxIds", metadata: [
-                    "count": "\(entries.count)"
-                ])
+                logger.debug(
+                    "TxSubmission2: replyTxIds",
+                    metadata: [
+                        "count": "\(entries.count)"
+                    ])
 
                 try await driver.send(.replyTxIds(entries)) { state in
                     guard let s = state as? TxSubmission2State else { return state }
@@ -108,8 +124,10 @@ public struct TxSubmission2Client: Sendable {
                 }
 
                 CardanoMetrics
-                    .counter(CardanoMetrics.txSubmissionsTotal,
-                             dimensions: [("network", "ntn"), ("result", "advertised")])
+                    .counter(
+                        CardanoMetrics.txSubmissionsTotal,
+                        dimensions: [("network", "ntn"), ("result", "advertised")]
+                    )
                     .increment(by: entries.count)
 
             case .requestTxs(let ids):
@@ -125,8 +143,10 @@ public struct TxSubmission2Client: Sendable {
                 }
 
                 CardanoMetrics
-                    .counter(CardanoMetrics.txSubmissionsTotal,
-                             dimensions: [("network", "ntn"), ("result", "sent")])
+                    .counter(
+                        CardanoMetrics.txSubmissionsTotal,
+                        dimensions: [("network", "ntn"), ("result", "sent")]
+                    )
                     .increment(by: txs.count)
 
             case .done:
@@ -146,13 +166,12 @@ public struct TxSubmission2Client: Sendable {
     // MARK: - Private
 
     private func makeDriver() -> ProtocolDriver<TxSubmission2Codec> {
-        let stream = demux.register(protocolID: MuxSDU.ProtocolID.txSubmission2)
         return ProtocolDriver(
             channel: channel,
             codec: TxSubmission2Codec(),
             protocolID: MuxSDU.ProtocolID.txSubmission2,
             initialState: TxSubmission2State.idle,
-            inboundStream: stream,
+            inboundStream: inboundStream,
             protocolName: "txSubmission2",
             logger: logger
         )

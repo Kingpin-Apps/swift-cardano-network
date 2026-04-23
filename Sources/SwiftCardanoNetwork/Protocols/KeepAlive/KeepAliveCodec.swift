@@ -16,7 +16,9 @@ public struct KeepAliveCodec: ProtocolCodec, Sendable {
 
     // MARK: - Encode
 
-    public func encode(_ message: KeepAliveMessage, allocator: ByteBufferAllocator) throws -> ByteBuffer {
+    public func encode(_ message: KeepAliveMessage, allocator: ByteBufferAllocator) throws
+        -> ByteBuffer
+    {
         var buf = allocator.buffer(capacity: 8)
 
         switch message {
@@ -40,20 +42,19 @@ public struct KeepAliveCodec: ProtocolCodec, Sendable {
 
     // MARK: - Decode
 
-    public func decode(_ buffer: ByteBuffer) throws -> KeepAliveMessage {
-        var buf = buffer
-        let arrayLen = try CBORLite.readArrayHeader(from: &buf)
-        let tag      = try CBORLite.readUInt(from: &buf)
+    public func decode(_ buffer: inout ByteBuffer) throws -> KeepAliveMessage {
+        let arrayLen = try CBORLite.readArrayHeader(from: &buffer)
+        let tag = try CBORLite.readUInt(from: &buffer)
 
         switch tag {
         case 0:
             guard arrayLen == 2 else { throw KeepAliveError.unexpectedArrayLength(arrayLen) }
-            let cookie = UInt16(try CBORLite.readUInt(from: &buf))
+            let cookie = UInt16(try CBORLite.readUInt(from: &buffer))
             return .keepAlive(cookie: cookie)
 
         case 1:
             guard arrayLen == 2 else { throw KeepAliveError.unexpectedArrayLength(arrayLen) }
-            let cookie = UInt16(try CBORLite.readUInt(from: &buf))
+            let cookie = UInt16(try CBORLite.readUInt(from: &buffer))
             return .keepAliveResponse(cookie: cookie)
 
         case 2:

@@ -37,7 +37,7 @@ private func connectAndHandshakeNtN(
     return (channel, demux)
 }
 
-// MARK: - RawBlock.decode and TypedChainEvent
+// MARK: - RawBlock.decode and EraBlockEvent
 
 @Suite("RawBlock decode") struct RawBlockDecodeTests {
 
@@ -71,7 +71,7 @@ private func connectAndHandshakeNtN(
     }
 }
 
-@Suite("TypedChainEvent") struct TypedChainEventTests {
+@Suite("EraBlockEvent") struct EraBlockEventTests {
 
     @Test func rollBackwardPreservedWithoutDecoding() async throws {
         // Verify the typed stream re-emits rollBackward events without touching
@@ -79,12 +79,12 @@ private func connectAndHandshakeNtN(
         let point = Point.blockPoint(slot: 1_000, hash: [UInt8](repeating: 0xAB, count: 32))
         let tip = Tip(point: .origin, blockNo: 0)
 
-        let stream = AsyncThrowingStream<TypedChainEvent, Error> { cont in
+        let stream = AsyncThrowingStream<EraBlockEvent, Error> { cont in
             cont.yield(.rollBackward(point, tip))
             cont.finish()
         }
 
-        var events: [TypedChainEvent] = []
+        var events: [EraBlockEvent] = []
         for try await event in stream {
             events.append(event)
         }
@@ -101,8 +101,8 @@ private func connectAndHandshakeNtN(
         let p1 = Point.blockPoint(slot: 500, hash: [UInt8](repeating: 0x11, count: 32))
         let p2 = Point.blockPoint(slot: 500, hash: [UInt8](repeating: 0x11, count: 32))
         let tip = Tip(point: .origin, blockNo: 0)
-        let e1 = TypedChainEvent.rollBackward(p1, tip)
-        let e2 = TypedChainEvent.rollBackward(p2, tip)
+        let e1 = EraBlockEvent.rollBackward(p1, tip)
+        let e2 = EraBlockEvent.rollBackward(p2, tip)
         if case .rollBackward(let a, _) = e1, case .rollBackward(let b, _) = e2 {
             #expect(a == b)
         } else {
@@ -132,13 +132,13 @@ struct ChainSyncClientFollowTypedTests {
 
         // ChainSyncClient.followTyped wraps follow(from:), but we can exercise the
         // transform logic directly by replicating it inline here.
-        let typedStream = AsyncThrowingStream<TypedChainEvent, Error> { continuation in
+        let typedStream = AsyncThrowingStream<EraBlockEvent, Error> { continuation in
             Task {
                 do {
                     for try await event in rawStream {
                         switch event {
                         case .rollForward(let rawBlock, let tip):
-                            let block = try rawBlock.decode()
+                            let block = try rawBlock.decodeEra()
                             continuation.yield(.rollForward(block, tip))
                         case .rollBackward(let p, let t):
                             continuation.yield(.rollBackward(p, t))
@@ -151,7 +151,7 @@ struct ChainSyncClientFollowTypedTests {
             }
         }
 
-        var collected: [TypedChainEvent] = []
+        var collected: [EraBlockEvent] = []
         for try await e in typedStream { collected.append(e) }
 
         #expect(collected.count == 1)
@@ -170,17 +170,15 @@ struct ChainSyncClientFollowTypedTests {
         config.chainSyncTip = Tip(point: .origin, blockNo: 0)
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let node = try await MockCardanoNode(config: config, group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, demux) = try await connectAndHandshakeNtN(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         // Use protocol ID 2 (NtN ChainSync) which the mock handles.
         let client = ChainSyncClient(channel: channel, demux: demux)
-        let stream = client.followTyped(from: [])
+        let stream: AsyncThrowingStream<EraHeaderEvent, Error> = client.follow(from: [])
 
         do {
             for try await _ in stream {
@@ -191,6 +189,9 @@ struct ChainSyncClientFollowTypedTests {
             // Block.fromCBOR threw because the bytes are not a valid Block.
             // The error propagated through the typed stream — correct behaviour.
         }
+
+        try? await channel.close()
+        try? await node.stop()
     }
 
     @Test("followTyped: multiple consecutive rollBackward events are all re-emitted")
@@ -205,13 +206,13 @@ struct ChainSyncClientFollowTypedTests {
             cont.finish()
         }
 
-        let typedStream = AsyncThrowingStream<TypedChainEvent, Error> { continuation in
+        let typedStream = AsyncThrowingStream<EraBlockEvent, Error> { continuation in
             Task {
                 do {
                     for try await event in rawStream {
                         switch event {
                         case .rollForward(let rb, let t):
-                            let block = try rb.decode()
+                            let block = try rb.decodeEra()
                             continuation.yield(.rollForward(block, t))
                         case .rollBackward(let p, let t):
                             continuation.yield(.rollBackward(p, t))
@@ -222,7 +223,7 @@ struct ChainSyncClientFollowTypedTests {
             }
         }
 
-        var collected: [TypedChainEvent] = []
+        var collected: [EraBlockEvent] = []
         for try await e in typedStream { collected.append(e) }
         #expect(collected.count == 3)
     }

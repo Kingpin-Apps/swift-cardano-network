@@ -154,7 +154,7 @@ private func makeChannelAndDemux() async throws -> (NIOAsyncTestingChannel, Demu
     @Test("connectToNode: throws a network error when the remote port refuses connections")
     func connectToNodeRefusedPort() async throws {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         // Bind to a random free port, capture it, then immediately close the server
         // so any subsequent connection attempt receives ECONNREFUSED.
@@ -178,10 +178,9 @@ private func makeChannelAndDemux() async throws -> (NIOAsyncTestingChannel, Demu
     @Test("connectToNode: returns a NodeToNodeConnection on successful handshake")
     func connectToNodeSucceeds() async throws {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let node = try await MockCardanoNode(group: group)
-        defer { Task { try? await node.stop() } }
 
         var config = CardanoNetworkConfiguration()
         config.connection.host = "127.0.0.1"
@@ -189,6 +188,7 @@ private func makeChannelAndDemux() async throws -> (NIOAsyncTestingChannel, Demu
 
         let conn = try await CardanoNode.connectToNode(config: config, group: group)
         await conn.close()
+        try? await node.stop()
     }
 
     // MARK: withClient
@@ -209,11 +209,9 @@ private func makeChannelAndDemux() async throws -> (NIOAsyncTestingChannel, Demu
     @Test("withClient: body is never executed when the connection fails")
     func withClientBodyNotCalledOnConnectionFailure() async {
         let config = CardanoNetworkConfiguration()
-        var bodyCalled = false
-        try? await CardanoNode.withClient(config: config) { _ in
-            bodyCalled = true
+        let _ = try? await CardanoNode.withClient(config: config) { _ in
+            Issue.record("Body should not be called when connection fails")
         }
-        #expect(bodyCalled == false)
     }
 
     @Test("withClient: throws missingSocketPath even with other config fields set")
@@ -236,7 +234,7 @@ private func makeChannelAndDemux() async throws -> (NIOAsyncTestingChannel, Demu
     @Test("withNode: throws a network error when the remote port refuses connections")
     func withNodeRefusedPort() async throws {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let server = try await ServerBootstrap(group: group)
             .bind(host: "127.0.0.1", port: 0)
@@ -256,7 +254,7 @@ private func makeChannelAndDemux() async throws -> (NIOAsyncTestingChannel, Demu
     @Test("withNode: body is never executed when the connection fails")
     func withNodeBodyNotCalledOnConnectionFailure() async throws {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let server = try await ServerBootstrap(group: group)
             .bind(host: "127.0.0.1", port: 0)
@@ -268,20 +266,17 @@ private func makeChannelAndDemux() async throws -> (NIOAsyncTestingChannel, Demu
         config.connection.host = "127.0.0.1"
         config.connection.port = closedPort
 
-        var bodyCalled = false
-        try? await CardanoNode.withNode(config: config, group: group) { _ in
-            bodyCalled = true
+        let _ = try? await CardanoNode.withNode(config: config, group: group) { _ in
+            Issue.record("Body should not be called when connection fails")
         }
-        #expect(bodyCalled == false)
     }
 
     @Test("withNode: returns the value produced by the body")
     func withNodeReturnsBodyValue() async throws {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let node = try await MockCardanoNode(group: group)
-        defer { Task { try? await node.stop() } }
 
         var config = CardanoNetworkConfiguration()
         config.connection.host = "127.0.0.1"
@@ -291,15 +286,15 @@ private func makeChannelAndDemux() async throws -> (NIOAsyncTestingChannel, Demu
             return 42
         }
         #expect(result == 42)
+        try? await node.stop()
     }
 
     @Test("withNode: propagates body errors and closes the connection")
     func withNodePropagatesBodyError() async throws {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let node = try await MockCardanoNode(group: group)
-        defer { Task { try? await node.stop() } }
 
         var config = CardanoNetworkConfiguration()
         config.connection.host = "127.0.0.1"
@@ -317,15 +312,15 @@ private func makeChannelAndDemux() async throws -> (NIOAsyncTestingChannel, Demu
         } catch {
             Issue.record("Expected SentinelError, got \(error)")
         }
+        try? await node.stop()
     }
 
     @Test("withNode: discardable result — body return value can be ignored")
     func withNodeDiscardableResult() async throws {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let node = try await MockCardanoNode(group: group)
-        defer { Task { try? await node.stop() } }
 
         var config = CardanoNetworkConfiguration()
         config.connection.host = "127.0.0.1"
@@ -335,5 +330,6 @@ private func makeChannelAndDemux() async throws -> (NIOAsyncTestingChannel, Demu
         try await CardanoNode.withNode(config: config, group: group) { _ in
             return "ignored"
         }
+        try? await node.stop()
     }
 }

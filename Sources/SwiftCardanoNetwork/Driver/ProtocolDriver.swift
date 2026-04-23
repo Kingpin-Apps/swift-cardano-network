@@ -1,7 +1,7 @@
-import NIOCore
+import Dispatch
 import Logging
 import Metrics
-import Dispatch
+import NIOCore
 
 /// Generic state-machine runner for a single Ouroboros mini-protocol.
 ///
@@ -22,6 +22,10 @@ public actor ProtocolDriver<Codec: ProtocolCodec> {
 
     private(set) public var state: any ProtocolState
     private let inboundIterator: SDUIteratorBox
+    /// Bytes left over from a previous SDU that weren't consumed by the last decode.
+    /// The Ouroboros mux may coalesce multiple protocol messages in a single SDU payload;
+    /// these leftover bytes are the start of the next message.
+    private var receiveLeftover: ByteBuffer
 
     public init(
         channel: Channel,
@@ -39,6 +43,7 @@ public actor ProtocolDriver<Codec: ProtocolCodec> {
         self.inboundIterator = SDUIteratorBox(stream: inboundStream)
         self.protocolName = protocolName
         self.logger = logger
+        self.receiveLeftover = channel.allocator.buffer(capacity: 0)
     }
 
     // MARK: - Send
@@ -54,13 +59,17 @@ public actor ProtocolDriver<Codec: ProtocolCodec> {
                 state: String(describing: state),
                 agency: state.agency
             )
-            logger.error("Agency violation on send", metadata: [
-                "protocol": "\(protocolName)",
-                "state": "\(state)",
-                "agency": "\(state.agency)"
-            ])
+            logger.error(
+                "Agency violation on send",
+                metadata: [
+                    "protocol": "\(protocolName)",
+                    "state": "\(state)",
+                    "agency": "\(state.agency)",
+                ])
             CardanoMetrics
-                .counter(CardanoMetrics.agencyViolationsTotal, dimensions: [("protocol", protocolName)])
+                .counter(
+                    CardanoMetrics.agencyViolationsTotal, dimensions: [("protocol", protocolName)]
+                )
                 .increment()
             throw err
         }
@@ -71,12 +80,14 @@ public actor ProtocolDriver<Codec: ProtocolCodec> {
         try await channel.writeAndFlush(sdu).get()
 
         let next = try transition(state)
-        logger.trace("State machine transition (send)", metadata: [
-            "protocol": "\(protocolName)",
-            "from": "\(state)",
-            "to": "\(next)",
-            "message": "\(message)"
-        ])
+        logger.trace(
+            "State machine transition (send)",
+            metadata: [
+                "protocol": "\(protocolName)",
+                "from": "\(state)",
+                "to": "\(next)",
+                "message": "\(message)",
+            ])
         state = next
     }
 
@@ -93,22 +104,60 @@ public actor ProtocolDriver<Codec: ProtocolCodec> {
             )
         }
 
-        guard let sdu = await inboundIterator.next() else {
-            // nil from AsyncStream means either the channel closed or the Task
-            // was cancelled. Prefer CancellationError so callers can distinguish.
-            try Task.checkCancellation()
-            throw ProtocolError.connectionClosed
-        }
+        // Accumulate SDU payloads until the CBOR message is complete.
+        // Large blocks (e.g. Conway) are segmented across multiple SDU frames
+        // by the Ouroboros mux layer and must be reassembled here.
+        //
+        // Seed with any bytes left over from the previous receive() call:
+        // the mux may coalesce multiple protocol messages into a single SDU,
+        // so we must not discard bytes that follow a successfully decoded message.
+        var accumulated = receiveLeftover
+        receiveLeftover = channel.allocator.buffer(capacity: 0)
+        let message: Codec.Message = try await {
+            while true {
+                // Only fetch a new SDU if the accumulated buffer is empty.
+                if accumulated.readableBytes == 0 {
+                    guard let sdu = await inboundIterator.next() else {
+                        try Task.checkCancellation()
+                        throw ProtocolError.connectionClosed
+                    }
+                    accumulated.writeImmutableBuffer(sdu.payload)
+                }
+                do {
+                    // codec.decode takes a value-type ByteBuffer; pass a copy so
+                    // we can measure how many bytes it consumed by diffing readerIndex.
+                    var probe = accumulated
+                    let decoded = try codec.decode(&probe)
+                    // Advance accumulated by exactly the bytes probe consumed.
+                    let consumed = probe.readerIndex - accumulated.readerIndex
+                    accumulated.moveReaderIndex(forwardBy: consumed)
+                    // Save any bytes that weren't consumed by the decode.
+                    if accumulated.readableBytes > 0 {
+                        receiveLeftover = accumulated
+                    }
+                    return decoded
+                } catch CBORError.truncated {
+                    // Incomplete CBOR — fetch the next SDU segment and append it.
+                    guard let sdu = await inboundIterator.next() else {
+                        try Task.checkCancellation()
+                        throw ProtocolError.connectionClosed
+                    }
+                    accumulated.writeImmutableBuffer(sdu.payload)
+                    continue
+                }
+            }
+        }()
 
-        let message = try codec.decode(sdu.payload)
         let next = try transition(message, state)
 
-        logger.trace("State machine transition (receive)", metadata: [
-            "protocol": "\(protocolName)",
-            "from": "\(state)",
-            "to": "\(next)",
-            "message": "\(message)"
-        ])
+        logger.trace(
+            "State machine transition (receive)",
+            metadata: [
+                "protocol": "\(protocolName)",
+                "from": "\(state)",
+                "to": "\(next)",
+                "message": "\(message)",
+            ])
         state = next
         return message
     }

@@ -9,10 +9,10 @@ public enum ChainEvent: Sendable {
 extension ChainEvent: CustomStringConvertible {
     public var description: String {
         switch self {
-        case .rollForward(let b, let t):
-            return "rollForward(era:\(b.era), tip:\(t.point), blockNo:\(t.blockNo))"
-        case .rollBackward(let p, let t):
-            return "rollBackward(to:\(p), tip:\(t.point))"
+            case .rollForward(let b, let t):
+                return "rollForward(era:\(b.era), tip:\(t.point), blockNo:\(t.blockNo))"
+            case .rollBackward(let p, let t):
+                return "rollBackward(to:\(p), tip:\(t.point))"
         }
     }
 }

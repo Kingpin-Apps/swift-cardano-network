@@ -8,8 +8,8 @@ private let alloc = ByteBufferAllocator()
 private let codec = BlockFetchCodec()
 
 private func roundTrip(_ msg: BlockFetchMessage) throws -> BlockFetchMessage {
-    let buf = try codec.encode(msg, allocator: alloc)
-    return try codec.decode(buf)
+    var buf = try codec.encode(msg, allocator: alloc)
+    return try codec.decode(&buf)
 }
 
 private func makePoint(slot: UInt64 = 100_000) -> Point {
@@ -257,7 +257,7 @@ private func makeBody(bytes: [UInt8] = [0x01, 0x02, 0x03, 0x04]) -> ByteBuffer {
         var buf = alloc.buffer(capacity: 2)
         buf.writeBytes([0x81, 0x1E])  // [30] — unknown tag
         #expect(throws: (any Error).self) {
-            _ = try codec.decode(buf)
+            _ = try codec.decode(&buf)
         }
     }
 
@@ -266,7 +266,7 @@ private func makeBody(bytes: [UInt8] = [0x01, 0x02, 0x03, 0x04]) -> ByteBuffer {
         // [1, 0] — array of 2 with tag 1 (clientDone expects array of 1)
         buf.writeBytes([0x82, 0x01, 0x00])
         #expect(throws: (any Error).self) {
-            _ = try codec.decode(buf)
+            _ = try codec.decode(&buf)
         }
     }
 }

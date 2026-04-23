@@ -8,8 +8,8 @@ private let alloc = ByteBufferAllocator()
 private let codec = LocalStateQueryCodec()
 
 private func roundTrip(_ msg: LocalStateQueryMessage) throws -> LocalStateQueryMessage {
-    let buf = try codec.encode(msg, allocator: alloc)
-    return try codec.decode(buf)
+    var buf = try codec.encode(msg, allocator: alloc)
+    return try codec.decode(&buf)
 }
 
 private func makeRawQuery(era: UInt16 = 6, bytes: [UInt8] = [0xDE, 0xAD]) -> RawQuery {
@@ -454,7 +454,7 @@ private let testHash: BlockHash = Array(repeating: 0xAB, count: 32)
         var buf = alloc.buffer(capacity: 3)
         buf.writeBytes([0x81, 0x18, 0x63])
         #expect(throws: (any Error).self) {
-            _ = try codec.decode(buf)
+            _ = try codec.decode(&buf)
         }
     }
 
@@ -463,7 +463,7 @@ private let testHash: BlockHash = Array(repeating: 0xAB, count: 32)
         var buf = alloc.buffer(capacity: 3)
         buf.writeBytes([0x82, 0x01, 0x00])
         #expect(throws: (any Error).self) {
-            _ = try codec.decode(buf)
+            _ = try codec.decode(&buf)
         }
     }
 
@@ -472,7 +472,7 @@ private let testHash: BlockHash = Array(repeating: 0xAB, count: 32)
         var buf = alloc.buffer(capacity: 3)
         buf.writeBytes([0x82, 0x05, 0x00])
         #expect(throws: (any Error).self) {
-            _ = try codec.decode(buf)
+            _ = try codec.decode(&buf)
         }
     }
 
@@ -481,7 +481,7 @@ private let testHash: BlockHash = Array(repeating: 0xAB, count: 32)
         var buf = alloc.buffer(capacity: 4)
         buf.writeBytes([0x82, 0x02, 0x18, 0x63])
         #expect(throws: (any Error).self) {
-            _ = try codec.decode(buf)
+            _ = try codec.decode(&buf)
         }
     }
 
@@ -491,14 +491,14 @@ private let testHash: BlockHash = Array(repeating: 0xAB, count: 32)
         // 0x82=array(2), 0x00=uint(0), 0x83=array(3), 0x01, 0x02, 0x03
         buf.writeBytes([0x82, 0x00, 0x83, 0x01, 0x02, 0x03])
         #expect(throws: (any Error).self) {
-            _ = try codec.decode(buf)
+            _ = try codec.decode(&buf)
         }
     }
 
     @Test func emptyBufferThrows() {
-        let buf = alloc.buffer(capacity: 0)
+        var buf = alloc.buffer(capacity: 0)
         #expect(throws: (any Error).self) {
-            _ = try codec.decode(buf)
+            _ = try codec.decode(&buf)
         }
     }
 }

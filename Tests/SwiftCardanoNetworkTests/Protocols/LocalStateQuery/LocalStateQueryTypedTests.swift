@@ -207,11 +207,9 @@ struct LocalStateQueryClientTypedTests {
         bytes += [UInt8](repeating: 0x00, count: 32)
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
         let node = try await makeNode(resultBytes: bytes, group: group)
-        defer { Task { try? await node.stop() } }
         let (channel, client) = try await makeClient(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         let point = try await client.queryLedgerTip()
         guard case .blockPoint(let slot, let hash) = point else {
@@ -220,6 +218,9 @@ struct LocalStateQueryClientTypedTests {
         }
         #expect(slot == 5_000)
         #expect(hash.count == 32)
+
+        try? await channel.close()
+        try? await node.stop()
     }
 
     @Test("queryLedgerTip: wrong array length throws unexpectedArrayLength")
@@ -228,11 +229,9 @@ struct LocalStateQueryClientTypedTests {
         let bytes: [UInt8] = [0x81, 0x00]
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
         let node = try await makeNode(resultBytes: bytes, group: group)
-        defer { Task { try? await node.stop() } }
         let (channel, client) = try await makeClient(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         do {
             _ = try await client.queryLedgerTip()
@@ -240,6 +239,9 @@ struct LocalStateQueryClientTypedTests {
         } catch LocalStateQueryError.unexpectedArrayLength(let count) {
             #expect(count == 1)
         }
+
+        try? await channel.close()
+        try? await node.stop()
     }
 
     // MARK: - queryEpochNo
@@ -248,14 +250,15 @@ struct LocalStateQueryClientTypedTests {
     func queryEpochNoReturnsEpoch() async throws {
         // CBOR uint(100): 0x18 0x64
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
         let node = try await makeNode(resultBytes: [0x18, 0x64], group: group)
-        defer { Task { try? await node.stop() } }
         let (channel, client) = try await makeClient(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         let epoch = try await client.queryEpochNo()
         #expect(epoch == 100)
+
+        try? await channel.close()
+        try? await node.stop()
     }
 
     // MARK: - queryUTxO(for addresses:)
@@ -264,14 +267,15 @@ struct LocalStateQueryClientTypedTests {
     func queryUTxOForAddressesEmptyResult() async throws {
         // CBOR: 0xA0 = empty map
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
         let node = try await makeNode(resultBytes: [0xA0], group: group)
-        defer { Task { try? await node.stop() } }
         let (channel, client) = try await makeClient(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         let utxos = try await client.queryUTxO(for: [] as [Address])
         #expect(utxos.isEmpty)
+
+        try? await channel.close()
+        try? await node.stop()
     }
 
     // MARK: - queryUTxO(for inputs:)
@@ -279,14 +283,15 @@ struct LocalStateQueryClientTypedTests {
     @Test("queryUTxO(for inputs:): empty CBOR map returns empty UTxO array")
     func queryUTxOForInputsEmptyResult() async throws {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
         let node = try await makeNode(resultBytes: [0xA0], group: group)
-        defer { Task { try? await node.stop() } }
         let (channel, client) = try await makeClient(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         let utxos = try await client.queryUTxO(for: [] as [TransactionInput])
         #expect(utxos.isEmpty)
+
+        try? await channel.close()
+        try? await node.stop()
     }
 
     // MARK: - queryProtocolParametersRaw
@@ -295,14 +300,15 @@ struct LocalStateQueryClientTypedTests {
     func queryProtocolParametersRawReturnsResult() async throws {
         let payload: [UInt8] = [0x83, 0x01, 0x02]  // any 3 bytes
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
         let node = try await makeNode(resultBytes: payload, group: group)
-        defer { Task { try? await node.stop() } }
         let (channel, client) = try await makeClient(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         let result = try await client.queryProtocolParametersRaw()
         #expect(result.rawCBOR.readableBytes == 3)
+
+        try? await channel.close()
+        try? await node.stop()
     }
 
     // MARK: - queryStakeDistribution
@@ -311,14 +317,15 @@ struct LocalStateQueryClientTypedTests {
     func queryStakeDistributionReturnsRawResult() async throws {
         let payload: [UInt8] = [0x80, 0x01]  // any 2 bytes
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
         let node = try await makeNode(resultBytes: payload, group: group)
-        defer { Task { try? await node.stop() } }
         let (channel, client) = try await makeClient(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         let result = try await client.queryStakeDistribution()
         #expect(result.rawCBOR.readableBytes == 2)
+
+        try? await channel.close()
+        try? await node.stop()
     }
 
     // MARK: - queryGovernanceState
@@ -327,19 +334,20 @@ struct LocalStateQueryClientTypedTests {
     func queryGovernanceStateReturnsRawResult() async throws {
         let payload: [UInt8] = [0x80, 0x02]  // any 2 bytes
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
         let node = try await makeNode(resultBytes: payload, group: group)
-        defer { Task { try? await node.stop() } }
         let (channel, client) = try await makeClient(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         let result = try await client.queryGovernanceState()
         #expect(result.rawCBOR.readableBytes == 2)
+
+        try? await channel.close()
+        try? await node.stop()
     }
 }
 
-// MARK: - queryProtocolParameters error propagation (kept outside .serialized suite to avoid
-// timeout interference when ProtocolParameters decode throws synchronously)
+// LocalStateQueryClientProtocolParamsTests is kept outside .serialized suite to avoid
+// timeout interference when ProtocolParameters decode throws synchronously.
 
 @Suite("LocalStateQueryClient queryProtocolParameters")
 struct LocalStateQueryClientProtocolParamsTests {
@@ -353,9 +361,8 @@ struct LocalStateQueryClientProtocolParamsTests {
         config.queryResult = RawResult(era: 6, rawCBOR: buf)
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
         let node = try await MockCardanoNode(config: config, group: group)
-        defer { Task { try? await node.stop() } }
 
         var connConfig = ConnectionConfig()
         connConfig.host = "127.0.0.1"
@@ -365,7 +372,6 @@ struct LocalStateQueryClientProtocolParamsTests {
             protocolConfig: ProtocolConfig(),
             group: group
         ).connect()
-        defer { Task { try? await channel.close() } }
         _ = try await HandshakeClient(
             channel: channel,
             demux: demux,
@@ -377,5 +383,8 @@ struct LocalStateQueryClientProtocolParamsTests {
         await #expect(throws: (any Error).self) {
             _ = try await client.queryProtocolParameters()
         }
+
+        try? await channel.close()
+        try? await node.stop()
     }
 }

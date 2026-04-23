@@ -1,5 +1,6 @@
-import Testing
 import NIOCore
+import Testing
+
 @testable import SwiftCardanoNetwork
 
 // MARK: - Helpers
@@ -8,12 +9,14 @@ private let alloc = ByteBufferAllocator()
 private let codec = ChainSyncCodec()
 
 private func roundTrip(_ msg: ChainSyncMessage) throws -> ChainSyncMessage {
-    let buf = try codec.encode(msg, allocator: alloc)
-    return try codec.decode(buf)
+    var buf = try codec.encode(msg, allocator: alloc)
+    return try codec.decode(&buf)
 }
 
 private func makeTip(slot: UInt64 = 0, blockNo: UInt64 = 0) -> Tip {
-    Tip(point: slot == 0 ? .origin : .blockPoint(slot: slot, hash: Array(repeating: 0xFF, count: 32)),
+    Tip(
+        point: slot == 0
+            ? .origin : .blockPoint(slot: slot, hash: Array(repeating: 0xFF, count: 32)),
         blockNo: blockNo)
 }
 
@@ -52,16 +55,18 @@ private func makeTip(slot: UInt64 = 0, blockNo: UInt64 = 0) -> Tip {
     @Test func storesPointAndBlockNo() {
         let tip = Tip(point: .origin, blockNo: 99)
         guard case .origin = tip.point else {
-            Issue.record("Expected .origin"); return
+            Issue.record("Expected .origin")
+            return
         }
         #expect(tip.blockNo == 99)
     }
 
     @Test func blockPointTip() {
         let point = Point.blockPoint(slot: 500_000, hash: Array(repeating: 0x42, count: 32))
-        let tip   = Tip(point: point, blockNo: 1_000)
+        let tip = Tip(point: point, blockNo: 1_000)
         guard case .blockPoint(let s, _) = tip.point else {
-            Issue.record("Expected blockPoint"); return
+            Issue.record("Expected blockPoint")
+            return
         }
         #expect(s == 500_000)
         #expect(tip.blockNo == 1_000)
@@ -74,17 +79,17 @@ private func makeTip(slot: UInt64 = 0, blockNo: UInt64 = 0) -> Tip {
     @Test func rollForwardDescription() {
         let buf = alloc.buffer(capacity: 0)
         let block = RawBlock(era: 6, rawCBOR: buf)
-        let tip   = makeTip(slot: 100_000, blockNo: 500)
+        let tip = makeTip(slot: 100_000, blockNo: 500)
         let event = ChainEvent.rollForward(block: block, tip: tip)
-        let desc  = event.description
+        let desc = event.description
         #expect(desc.contains("rollForward"))
-        #expect(desc.contains("6"))    // era
+        #expect(desc.contains("6"))  // era
         #expect(desc.contains("500"))  // blockNo
     }
 
     @Test func rollBackwardDescription() {
         let event = ChainEvent.rollBackward(to: .origin, tip: makeTip())
-        let desc  = event.description
+        let desc = event.description
         #expect(desc.contains("rollBackward"))
         #expect(desc.contains("origin"))
     }
@@ -94,11 +99,11 @@ private func makeTip(slot: UInt64 = 0, blockNo: UInt64 = 0) -> Tip {
 
 @Suite("ChainSyncState") struct ChainSyncStateTests {
     @Test func agencyRules() {
-        #expect(ChainSyncState.idle.agency      == .client)
-        #expect(ChainSyncState.canAwait.agency  == .server)
+        #expect(ChainSyncState.idle.agency == .client)
+        #expect(ChainSyncState.canAwait.agency == .server)
         #expect(ChainSyncState.mustReply.agency == .server)
         #expect(ChainSyncState.intersect.agency == .server)
-        #expect(ChainSyncState.done.agency      == .nobody)
+        #expect(ChainSyncState.done.agency == .nobody)
     }
 
     // MARK: Send transitions
@@ -128,8 +133,9 @@ private func makeTip(slot: UInt64 = 0, blockNo: UInt64 = 0) -> Tip {
     }
 
     @Test func canAwaitRollForwardToIdle() throws {
-        let msg = ChainSyncMessage.rollForward(RawBlock(era: 6, rawCBOR: alloc.buffer(capacity: 0)),
-                                               makeTip())
+        let msg = ChainSyncMessage.rollForward(
+            RawBlock(era: 6, rawCBOR: alloc.buffer(capacity: 0)),
+            makeTip())
         #expect(try ChainSyncState.canAwait.afterReceive(msg) == .idle)
     }
 
@@ -139,8 +145,9 @@ private func makeTip(slot: UInt64 = 0, blockNo: UInt64 = 0) -> Tip {
     }
 
     @Test func mustReplyRollForwardToIdle() throws {
-        let msg = ChainSyncMessage.rollForward(RawBlock(era: 5, rawCBOR: alloc.buffer(capacity: 0)),
-                                               makeTip())
+        let msg = ChainSyncMessage.rollForward(
+            RawBlock(era: 5, rawCBOR: alloc.buffer(capacity: 0)),
+            makeTip())
         #expect(try ChainSyncState.mustReply.afterReceive(msg) == .idle)
     }
 
@@ -180,21 +187,24 @@ private func makeTip(slot: UInt64 = 0, blockNo: UInt64 = 0) -> Tip {
     @Test func requestNextRoundTrip() throws {
         let decoded = try roundTrip(.requestNext)
         guard case .requestNext = decoded else {
-            Issue.record("Expected .requestNext, got \(decoded)"); return
+            Issue.record("Expected .requestNext, got \(decoded)")
+            return
         }
     }
 
     @Test func doneRoundTrip() throws {
         let decoded = try roundTrip(.done)
         guard case .done = decoded else {
-            Issue.record("Expected .done, got \(decoded)"); return
+            Issue.record("Expected .done, got \(decoded)")
+            return
         }
     }
 
     @Test func awaitReplyRoundTrip() throws {
         let decoded = try roundTrip(.awaitReply)
         guard case .awaitReply = decoded else {
-            Issue.record("Expected .awaitReply, got \(decoded)"); return
+            Issue.record("Expected .awaitReply, got \(decoded)")
+            return
         }
     }
 
@@ -203,7 +213,8 @@ private func makeTip(slot: UInt64 = 0, blockNo: UInt64 = 0) -> Tip {
     @Test func findIntersectEmptyRoundTrip() throws {
         let decoded = try roundTrip(.findIntersect([]))
         guard case .findIntersect(let pts) = decoded else {
-            Issue.record("Expected .findIntersect"); return
+            Issue.record("Expected .findIntersect")
+            return
         }
         #expect(pts.isEmpty)
     }
@@ -215,12 +226,14 @@ private func makeTip(slot: UInt64 = 0, blockNo: UInt64 = 0) -> Tip {
         ]
         let decoded = try roundTrip(.findIntersect(points))
         guard case .findIntersect(let pts) = decoded else {
-            Issue.record("Expected .findIntersect"); return
+            Issue.record("Expected .findIntersect")
+            return
         }
         #expect(pts.count == 2)
         #expect(pts[0] == .origin)
         guard case .blockPoint(let slot, let hash) = pts[1] else {
-            Issue.record("Expected .blockPoint"); return
+            Issue.record("Expected .blockPoint")
+            return
         }
         #expect(slot == 1_000_000)
         #expect(hash == Array(repeating: 0xAB, count: 32))
@@ -231,19 +244,22 @@ private func makeTip(slot: UInt64 = 0, blockNo: UInt64 = 0) -> Tip {
     @Test func rollForwardShelleyRoundTrip() throws {
         var rawBuf = alloc.buffer(capacity: 4)
         rawBuf.writeBytes([0xCA, 0xFE, 0xBA, 0xBE])
-        let block   = RawBlock(era: 6, rawCBOR: rawBuf)
-        let tip     = Tip(point: .blockPoint(slot: 99_000, hash: Array(repeating: 0x42, count: 32)),
-                          blockNo: 12_345)
+        let block = RawBlock(era: 6, rawCBOR: rawBuf)
+        let tip = Tip(
+            point: .blockPoint(slot: 99_000, hash: Array(repeating: 0x42, count: 32)),
+            blockNo: 12_345)
         let decoded = try roundTrip(.rollForward(block, tip))
 
         guard case .rollForward(let b, let t) = decoded else {
-            Issue.record("Expected .rollForward"); return
+            Issue.record("Expected .rollForward")
+            return
         }
         #expect(b.era == 6)
         #expect(b.rawCBOR.readableBytes == 4)
         #expect(t.blockNo == 12_345)
         guard case .blockPoint(let slot, _) = t.point else {
-            Issue.record("Expected .blockPoint tip"); return
+            Issue.record("Expected .blockPoint tip")
+            return
         }
         #expect(slot == 99_000)
     }
@@ -251,15 +267,64 @@ private func makeTip(slot: UInt64 = 0, blockNo: UInt64 = 0) -> Tip {
     @Test func rollForwardByronRoundTrip() throws {
         var rawBuf = alloc.buffer(capacity: 6)
         rawBuf.writeBytes([0x82, 0x00, 0x01, 0x02, 0x03, 0x04])
-        let block   = RawBlock(era: 0, rawCBOR: rawBuf)  // Byron
-        let tip     = Tip(point: .origin, blockNo: 0)
+        let block = RawBlock(era: 0, rawCBOR: rawBuf)  // Byron
+        let tip = Tip(point: .origin, blockNo: 0)
         let decoded = try roundTrip(.rollForward(block, tip))
 
         guard case .rollForward(let b, _) = decoded else {
-            Issue.record("Expected .rollForward"); return
+            Issue.record("Expected .rollForward")
+            return
         }
         #expect(b.era == 0)
         #expect(b.rawCBOR.readableBytes == 6)
+    }
+
+    // MARK: RollForward — NtN direct-array header (no tag-24 wrapping)
+
+    /// Simulates how a real mainnet NtN node encodes block headers:
+    /// `[era, [header_body, kes_signature]]` — no tag-24 outer wrapping.
+    @Test func rollForwardNtNDirectArrayHeader() throws {
+        // Build a minimal 2-element CBOR array representing [header_body, kes_sig].
+        // 0x82 = array(2), then two small uint values as placeholders.
+        var headerBuf = alloc.buffer(capacity: 3)
+        headerBuf.writeBytes([0x82, 0x01, 0x02])  // [1, 2] in CBOR
+
+        // Manually construct the wire bytes for [2, [era, [1, 2]], tip]:
+        //   outer array(3): 0x83
+        //   msg tag uint 2: 0x02
+        //   wrappedHeader array(2): 0x82
+        //     era uint 6: 0x06
+        //     header directly as array(2): 0x82 0x01 0x02  (no tag-24)
+        //   tip array(2): 0x82
+        //     point array(0): 0x80  (origin)
+        //     blockNo uint 0: 0x00
+        var buf = alloc.buffer(capacity: 16)
+        buf.writeBytes([
+            0x83,  // array(3)
+            0x02,  // uint 2 — msgRollForward tag
+            0x82,  // array(2) — wrappedHeader
+            0x06,  // uint 6 — Conway era
+            0x82, 0x01, 0x02,  // array(2) [1, 2] — header directly, no tag-24
+            0x82,  // array(2) — tip
+            0x80,  // array(0) — origin point
+            0x00,  // uint 0 — blockNo
+        ])
+
+        let decoded = try codec.decode(&buf)
+
+        guard case .rollForward(let b, let t) = decoded else {
+            Issue.record("Expected .rollForward, got \(decoded)")
+            return
+        }
+        #expect(b.era == 6)
+        // rawCBOR should contain the 3 bytes: 0x82 0x01 0x02
+        #expect(b.rawCBOR.readableBytes == 3)
+        #expect(b.rawCBOR.getBytes(at: b.rawCBOR.readerIndex, length: 3) == [0x82, 0x01, 0x02])
+        guard case .origin = t.point else {
+            Issue.record("Expected origin tip")
+            return
+        }
+        #expect(t.blockNo == 0)
     }
 
     // MARK: RollBackward
@@ -267,19 +332,22 @@ private func makeTip(slot: UInt64 = 0, blockNo: UInt64 = 0) -> Tip {
     @Test func rollBackwardOriginRoundTrip() throws {
         let decoded = try roundTrip(.rollBackward(.origin, makeTip()))
         guard case .rollBackward(let p, _) = decoded else {
-            Issue.record("Expected .rollBackward"); return
+            Issue.record("Expected .rollBackward")
+            return
         }
         #expect(p == .origin)
     }
 
     @Test func rollBackwardBlockPointRoundTrip() throws {
-        let point   = Point.blockPoint(slot: 500_000, hash: Array(repeating: 0x11, count: 32))
+        let point = Point.blockPoint(slot: 500_000, hash: Array(repeating: 0x11, count: 32))
         let decoded = try roundTrip(.rollBackward(point, makeTip(slot: 600_000, blockNo: 9_999)))
         guard case .rollBackward(let p, let t) = decoded else {
-            Issue.record("Expected .rollBackward"); return
+            Issue.record("Expected .rollBackward")
+            return
         }
         guard case .blockPoint(let slot, _) = p else {
-            Issue.record("Expected .blockPoint"); return
+            Issue.record("Expected .blockPoint")
+            return
         }
         #expect(slot == 500_000)
         #expect(t.blockNo == 9_999)
@@ -288,13 +356,15 @@ private func makeTip(slot: UInt64 = 0, blockNo: UInt64 = 0) -> Tip {
     // MARK: IntersectFound / IntersectNotFound
 
     @Test func intersectFoundRoundTrip() throws {
-        let point   = Point.blockPoint(slot: 200_000, hash: Array(repeating: 0xCC, count: 32))
+        let point = Point.blockPoint(slot: 200_000, hash: Array(repeating: 0xCC, count: 32))
         let decoded = try roundTrip(.intersectFound(point, makeTip(slot: 300_000, blockNo: 4_000)))
         guard case .intersectFound(let p, let t) = decoded else {
-            Issue.record("Expected .intersectFound"); return
+            Issue.record("Expected .intersectFound")
+            return
         }
         guard case .blockPoint(let slot, _) = p else {
-            Issue.record("Expected .blockPoint"); return
+            Issue.record("Expected .blockPoint")
+            return
         }
         #expect(slot == 200_000)
         #expect(t.blockNo == 4_000)
@@ -303,10 +373,12 @@ private func makeTip(slot: UInt64 = 0, blockNo: UInt64 = 0) -> Tip {
     @Test func intersectNotFoundRoundTrip() throws {
         let decoded = try roundTrip(.intersectNotFound(makeTip(slot: 0, blockNo: 0)))
         guard case .intersectNotFound(let t) = decoded else {
-            Issue.record("Expected .intersectNotFound"); return
+            Issue.record("Expected .intersectNotFound")
+            return
         }
         guard case .origin = t.point else {
-            Issue.record("Expected .origin tip"); return
+            Issue.record("Expected .origin tip")
+            return
         }
     }
 

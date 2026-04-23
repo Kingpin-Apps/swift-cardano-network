@@ -60,10 +60,10 @@ extension NodeToClientConnection {
     ///
     /// Equivalent to `chainSync.followTyped(from:)` but callable directly on
     /// the connection for convenience.
-    public func followTyped(
+    public func follow(
         from points: [Point] = []
-    ) -> AsyncThrowingStream<TypedChainEvent, Error> {
-        chainSync.followTyped(from: points)
+    ) -> AsyncThrowingStream<EraBlockEvent, Error> {
+        chainSync.follow(from: points)
     }
 
     // MARK: - Typed mempool snapshot
@@ -71,5 +71,30 @@ extension NodeToClientConnection {
     /// Snapshot the local mempool and return decoded `Transaction` values.
     public func snapshotMempool() async throws -> (slotNo: UInt64, txs: [Transaction]) {
         try await txMonitor.snapshotTyped()
+    }
+
+    // MARK: - Mempool extras
+
+    /// Check whether a specific transaction is in the current mempool snapshot.
+    ///
+    /// Equivalent to `txMonitor.hasTx(_:)` but callable directly on the connection.
+    public func hasTx(_ txId: TxId) async throws -> Bool {
+        try await txMonitor.hasTx(txId)
+    }
+
+    /// Read mempool size metrics (capacity, current usage, transaction count).
+    ///
+    /// Equivalent to `txMonitor.sizes()` but callable directly on the connection.
+    public func mempoolSizes() async throws -> MempoolCapacity {
+        try await txMonitor.sizes()
+    }
+
+    /// Read extended mempool measures (totals plus named capacity/current pairs).
+    ///
+    /// Equivalent to `txMonitor.measures()` but callable directly on the connection.
+    public func mempoolMeasures() async throws
+        -> (totalTxs: UInt32, measures: [(key: String, current: Int64, capacity: Int64)])
+    {
+        try await txMonitor.measures()
     }
 }

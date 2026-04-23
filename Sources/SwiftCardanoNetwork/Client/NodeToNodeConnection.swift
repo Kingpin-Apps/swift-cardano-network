@@ -36,6 +36,11 @@ public struct NodeToNodeConnection: Sendable {
     /// The underlying NIO channel.  Close via `close()` rather than directly.
     public let channel: Channel
 
+    /// The underlying demultiplexer.  Exposed internally so that dummy-protocol
+    /// clients (`ReqRespClient`, ad-hoc `PingPongClient`) can be instantiated
+    /// on demand via `reqResp(codec:)`.
+    let demux: DemuxHandler
+
     // MARK: - Mini-protocol clients
 
     /// ChainSync — streams block headers (fetch bodies separately via `blockFetch`).
@@ -49,33 +54,51 @@ public struct NodeToNodeConnection: Sendable {
 
     // MARK: - Internal state
 
-    private let _keepAliveTask: Task<Void, Error>
+    /// The background KeepAlive probe task. `nil` when the connection was
+    /// created with `startKeepAlive: false` (for example, for dummy-protocol
+    /// sessions that do not negotiate the full NtN suite).
+    private let _keepAliveTask: Task<Void, Error>?
 
     // MARK: - Init (package-internal; use CardanoNode.connectToNode)
 
-    init(channel: Channel, demux: DemuxHandler, protocolConfig: ProtocolConfig) {
+    /// - Parameters:
+    ///   - startKeepAlive: When `true` (the default) a KeepAlive probe loop
+    ///     is started in the background. Set to `false` for connections that
+    ///     only speak dummy protocols — the remote will not have a KeepAlive
+    ///     responder and the probes would error.
+    init(
+        channel: Channel,
+        demux: DemuxHandler,
+        protocolConfig: ProtocolConfig,
+        startKeepAlive: Bool = true
+    ) {
         self.channel = channel
+        self.demux = demux
         self.chainSync = ChainSyncClient(channel: channel, demux: demux)
         self.blockFetch = BlockFetchClient(channel: channel, demux: demux)
         self.txSubmission2 = TxSubmission2Client(channel: channel, demux: demux)
 
-        let handler = KeepAliveHandler(
-            channel: channel,
-            demux: demux,
-            intervalSeconds: protocolConfig.keepAliveIntervalSeconds,
-            timeoutSeconds: protocolConfig.keepAliveTimeoutSeconds
-        )
-        self._keepAliveTask = Task { try await handler.run() }
+        if startKeepAlive {
+            let handler = KeepAliveHandler(
+                channel: channel,
+                demux: demux,
+                intervalSeconds: protocolConfig.keepAliveIntervalSeconds,
+                timeoutSeconds: protocolConfig.keepAliveTimeoutSeconds
+            )
+            self._keepAliveTask = Task { try await handler.run() }
+        } else {
+            self._keepAliveTask = nil
+        }
     }
 
     // MARK: - Lifecycle
 
     /// Close the underlying connection gracefully.
     ///
-    /// Cancels the KeepAlive probe loop (causing it to send `done` to the
-    /// peer) and then closes the NIO channel.  Safe to call multiple times.
+    /// Cancels the KeepAlive probe loop (if running) and then closes the NIO
+    /// channel. Safe to call multiple times.
     public func close() async {
-        _keepAliveTask.cancel()
+        _keepAliveTask?.cancel()
         try? await channel.close()
     }
 }

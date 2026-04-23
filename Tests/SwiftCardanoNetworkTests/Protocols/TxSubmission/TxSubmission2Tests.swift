@@ -8,8 +8,8 @@ private let alloc = ByteBufferAllocator()
 private let codec = TxSubmission2Codec()
 
 private func roundTrip(_ msg: TxSubmission2Message) throws -> TxSubmission2Message {
-    let buf = try codec.encode(msg, allocator: alloc)
-    return try codec.decode(buf)
+    var buf = try codec.encode(msg, allocator: alloc)
+    return try codec.decode(&buf)
 }
 
 private func makeTxId(byte: UInt8 = 0xAB) -> TxId {
@@ -317,7 +317,7 @@ private func makeTxBody(bytes: [UInt8] = [0x01, 0x02, 0x03, 0x04]) -> ByteBuffer
         var buf = alloc.buffer(capacity: 2)
         buf.writeBytes([0x81, 0x1E])  // [30]
         #expect(throws: (any Error).self) {
-            _ = try codec.decode(buf)
+            _ = try codec.decode(&buf)
         }
     }
 
@@ -326,7 +326,7 @@ private func makeTxBody(bytes: [UInt8] = [0x01, 0x02, 0x03, 0x04]) -> ByteBuffer
         var buf = alloc.buffer(capacity: 3)
         buf.writeBytes([0x82, 0x04, 0x00])
         #expect(throws: (any Error).self) {
-            _ = try codec.decode(buf)
+            _ = try codec.decode(&buf)
         }
     }
 
@@ -335,14 +335,14 @@ private func makeTxBody(bytes: [UInt8] = [0x01, 0x02, 0x03, 0x04]) -> ByteBuffer
         var buf = alloc.buffer(capacity: 4)
         buf.writeBytes([0x83, 0x00, 0xF5, 0x00])
         #expect(throws: (any Error).self) {
-            _ = try codec.decode(buf)
+            _ = try codec.decode(&buf)
         }
     }
 
     @Test func emptyBufferThrows() {
-        let buf = alloc.buffer(capacity: 0)
+        var buf = alloc.buffer(capacity: 0)
         #expect(throws: (any Error).self) {
-            _ = try codec.decode(buf)
+            _ = try codec.decode(&buf)
         }
     }
 }

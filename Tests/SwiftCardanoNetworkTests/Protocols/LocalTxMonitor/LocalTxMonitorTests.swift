@@ -8,8 +8,8 @@ private let alloc = ByteBufferAllocator()
 private let codec = LocalTxMonitorCodec()
 
 private func roundTrip(_ msg: LocalTxMonitorMessage) throws -> LocalTxMonitorMessage {
-    let buf = try codec.encode(msg, allocator: alloc)
-    return try codec.decode(buf)
+    var buf = try codec.encode(msg, allocator: alloc)
+    return try codec.decode(&buf)
 }
 
 private func makeTx(bytes: [UInt8] = [0xDE, 0xAD, 0xBE, 0xEF]) -> MempoolTx {
@@ -248,8 +248,8 @@ private let sampleTxId: TxId = Array(repeating: 0xAB, count: 32)
 
     @Test func awaitAcquireRoundTrip() throws {
         // awaitAcquire encodes as [1] (same as acquire); decode returns .acquire
-        let buf = try codec.encode(.awaitAcquire, allocator: alloc)
-        let decoded = try codec.decode(buf)
+        var buf = try codec.encode(.awaitAcquire, allocator: alloc)
+        let decoded = try codec.decode(&buf)
         guard case .acquire = decoded else {
             Issue.record("Expected .acquire (awaitAcquire wire encoding), got \(decoded)"); return
         }
@@ -543,7 +543,7 @@ private let sampleTxId: TxId = Array(repeating: 0xAB, count: 32)
         var buf = alloc.buffer(capacity: 3)
         buf.writeBytes([0x81, 0x18, 0x63])
         #expect(throws: (any Error).self) {
-            _ = try codec.decode(buf)
+            _ = try codec.decode(&buf)
         }
     }
 
@@ -552,7 +552,7 @@ private let sampleTxId: TxId = Array(repeating: 0xAB, count: 32)
         var buf = alloc.buffer(capacity: 3)
         buf.writeBytes([0x82, 0x01, 0x00])
         #expect(throws: (any Error).self) {
-            _ = try codec.decode(buf)
+            _ = try codec.decode(&buf)
         }
     }
 
@@ -561,7 +561,7 @@ private let sampleTxId: TxId = Array(repeating: 0xAB, count: 32)
         var buf = alloc.buffer(capacity: 3)
         buf.writeBytes([0x82, 0x05, 0x00])
         #expect(throws: (any Error).self) {
-            _ = try codec.decode(buf)
+            _ = try codec.decode(&buf)
         }
     }
 
@@ -570,14 +570,14 @@ private let sampleTxId: TxId = Array(repeating: 0xAB, count: 32)
         var buf = alloc.buffer(capacity: 3)
         buf.writeBytes([0x82, 0x00, 0x00])
         #expect(throws: (any Error).self) {
-            _ = try codec.decode(buf)
+            _ = try codec.decode(&buf)
         }
     }
 
     @Test func emptyBufferThrows() {
-        let buf = alloc.buffer(capacity: 0)
+        var buf = alloc.buffer(capacity: 0)
         #expect(throws: (any Error).self) {
-            _ = try codec.decode(buf)
+            _ = try codec.decode(&buf)
         }
     }
 }

@@ -78,12 +78,10 @@ struct LocalTxMonitorClientSnapshotTypedTests {
         config.mempoolTxs = []
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
         let node = try await MockCardanoNode(config: config, group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, demux) = try await connectAndHandshakeNtN(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         let (slotNo, txs) = try await LocalTxMonitorClient(
             channel: channel, demux: demux
@@ -91,6 +89,9 @@ struct LocalTxMonitorClientSnapshotTypedTests {
 
         #expect(slotNo == 42_000)
         #expect(txs.isEmpty)
+
+        try? await channel.close()
+        try? await node.stop()
     }
 
     @Test("snapshotTyped: mempool tx with invalid CBOR propagates decode error")
@@ -101,17 +102,18 @@ struct LocalTxMonitorClientSnapshotTypedTests {
         config.mempoolTxs = [makeMempoolTx(bytes: [0xFF, 0xFF, 0xFF])]
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
         let node = try await MockCardanoNode(config: config, group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, demux) = try await connectAndHandshakeNtN(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         let client = LocalTxMonitorClient(channel: channel, demux: demux)
         await #expect(throws: (any Error).self) {
             _ = try await client.snapshotTyped()
         }
+
+        try? await channel.close()
+        try? await node.stop()
     }
 
     @Test("snapshotTyped: slotNo matches the mock-configured mempool slot")
@@ -121,16 +123,17 @@ struct LocalTxMonitorClientSnapshotTypedTests {
         config.mempoolTxs = []
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
         let node = try await MockCardanoNode(config: config, group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, demux) = try await connectAndHandshakeNtN(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         let (slotNo, _) = try await LocalTxMonitorClient(
             channel: channel, demux: demux
         ).snapshotTyped()
         #expect(slotNo == 999_999)
+
+        try? await channel.close()
+        try? await node.stop()
     }
 }

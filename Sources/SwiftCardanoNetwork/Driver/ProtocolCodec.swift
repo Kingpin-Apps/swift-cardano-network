@@ -12,5 +12,6 @@ public protocol ProtocolCodec: Sendable {
     func encode(_ message: Message, allocator: ByteBufferAllocator) throws -> ByteBuffer
 
     /// Decode a `Message` from the SDU payload `buffer`.
-    func decode(_ buffer: ByteBuffer) throws -> Message
+    /// The buffer's reader index is advanced past the consumed bytes.
+    func decode(_ buffer: inout ByteBuffer) throws -> Message
 }

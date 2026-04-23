@@ -34,6 +34,11 @@ public struct NodeToClientConnection: Sendable {
     /// The underlying NIO channel.  Close via `close()` rather than directly.
     public let channel: Channel
 
+    /// The underlying demultiplexer.  Exposed internally so that dummy-protocol
+    /// clients (`ReqRespClient`, ad-hoc `PingPongClient`) can be instantiated
+    /// on demand via `reqResp(codec:)`.
+    let demux: DemuxHandler
+
     // MARK: - Mini-protocol clients
 
     /// ChainSync — streams full blocks (NtC delivers complete blocks, not headers).
@@ -52,6 +57,7 @@ public struct NodeToClientConnection: Sendable {
 
     init(channel: Channel, demux: DemuxHandler) {
         self.channel = channel
+        self.demux = demux
         self.chainSync = ChainSyncClient(channel: channel, demux: demux, protocolID: MuxSDU.ProtocolID.ntcChainSync)
         self.txSubmission = LocalTxSubmissionClient(channel: channel, demux: demux)
         self.stateQuery = LocalStateQueryClient(channel: channel, demux: demux)

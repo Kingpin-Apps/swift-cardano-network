@@ -79,12 +79,10 @@ struct NodeToClientConnectionTypedTests {
         bytes += [UInt8](repeating: 0x00, count: 32)
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
         let node = try await makeNtCNode(resultBytes: bytes, group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, conn) = try await connectNtC(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         let point = try await conn.queryLedgerTip()
         guard case .blockPoint(let slot, let hash) = point else {
@@ -93,6 +91,9 @@ struct NodeToClientConnectionTypedTests {
         }
         #expect(slot == 5_000)
         #expect(hash.count == 32)
+
+        try? await channel.close()
+        try? await node.stop()
     }
 
     // MARK: - queryEpochNo
@@ -101,15 +102,16 @@ struct NodeToClientConnectionTypedTests {
     func queryEpochNoReturnsEpoch() async throws {
         // CBOR uint(200): 0x18 0xC8
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
         let node = try await makeNtCNode(resultBytes: [0x18, 0xC8], group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, conn) = try await connectNtC(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         let epoch = try await conn.queryEpochNo()
         #expect(epoch == 200)
+
+        try? await channel.close()
+        try? await node.stop()
     }
 
     // MARK: - queryUTxO(for addresses:)
@@ -117,15 +119,16 @@ struct NodeToClientConnectionTypedTests {
     @Test("queryUTxO(for:) addresses: empty map returns empty UTxO array")
     func queryUTxOForAddressesReturnsEmpty() async throws {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
         let node = try await makeNtCNodeWithEmptyMap(group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, conn) = try await connectNtC(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         let utxos = try await conn.queryUTxO(for: [] as [Address])
         #expect(utxos.isEmpty)
+
+        try? await channel.close()
+        try? await node.stop()
     }
 
     // MARK: - queryUTxO(for inputs:)
@@ -133,15 +136,16 @@ struct NodeToClientConnectionTypedTests {
     @Test("queryUTxO(for:) inputs: empty map returns empty UTxO array")
     func queryUTxOForTransactionInputsReturnsEmpty() async throws {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
         let node = try await makeNtCNodeWithEmptyMap(group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, conn) = try await connectNtC(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         let utxos = try await conn.queryUTxO(for: [] as [TransactionInput])
         #expect(utxos.isEmpty)
+
+        try? await channel.close()
+        try? await node.stop()
     }
 
     // MARK: - snapshotMempool
@@ -149,16 +153,17 @@ struct NodeToClientConnectionTypedTests {
     @Test("snapshotMempool: empty mempool returns correct slot and no transactions")
     func snapshotMempoolReturnsEmptyInfo() async throws {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
         let node = try await makeNtCNodeWithEmptyMap(group: group, mempoolSlot: 77_777)
-        defer { Task { try? await node.stop() } }
 
         let (channel, conn) = try await connectNtC(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         let (slotNo, txs) = try await conn.snapshotMempool()
         #expect(slotNo == 77_777)
         #expect(txs.isEmpty)
+
+        try? await channel.close()
+        try? await node.stop()
     }
 
     // MARK: - followTyped
@@ -169,15 +174,16 @@ struct NodeToClientConnectionTypedTests {
         // and returns an AsyncThrowingStream.  We do not iterate: the mock has no
         // NtC-ChainSync handler (protocol 5), so any iteration would stall.
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
         let node = try await makeNtCNodeWithEmptyMap(group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, conn) = try await connectNtC(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
-        // Just obtain the stream — covers the `followTyped` delegation line.
-        let _: AsyncThrowingStream<TypedChainEvent, Error> = conn.followTyped(from: [])
+        // Just obtain the stream — covers the `follow` delegation line.
+        let _: AsyncThrowingStream<EraBlockEvent, Error> = conn.follow(from: [])
+
+        try? await channel.close()
+        try? await node.stop()
     }
 
     // MARK: - queryProtocolParameters
@@ -187,15 +193,16 @@ struct NodeToClientConnectionTypedTests {
         // 0x01 is CBOR uint(1) — not valid ProtocolParameters CBOR.
         // The call must enter the function body and propagate the decode error.
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
         let node = try await makeNtCNode(resultBytes: [0x01], group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, conn) = try await connectNtC(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         await #expect(throws: (any Error).self) {
             _ = try await conn.queryProtocolParameters()
         }
+
+        try? await channel.close()
+        try? await node.stop()
     }
 }

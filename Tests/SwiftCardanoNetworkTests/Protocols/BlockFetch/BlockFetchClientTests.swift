@@ -44,6 +44,15 @@ private func connectAndHandshakeNtN(
 @Suite("BlockFetchClient", .serialized)
 struct BlockFetchClientTests {
 
+    init() {
+        // Enable debug-level logging to stdout for the duration of these tests
+        // so all BlockFetchClient log calls (including .debug ones) are visible.
+        var cfg = LoggingConfig()
+        cfg.level = .debug
+        cfg.destination = "stdout"
+        LoggerFactory.configure(cfg)
+    }
+
     // MARK: Empty batch
 
     @Test("fetch: throws BlockFetchError.emptyBatch when server has no blocks")
@@ -52,24 +61,25 @@ struct BlockFetchClientTests {
         config.blockFetchBlocks = []  // mock will reply noBlocks
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let node = try await MockCardanoNode(config: config, group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, demux) = try await connectAndHandshakeNtN(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         let client = BlockFetchClient(channel: channel, demux: demux)
 
         do {
-            _ = try await client.fetch(from: .origin, to: .origin)
+            let _: [ByteBuffer] = try await client.fetch(from: .origin, to: .origin)
             Issue.record("Expected BlockFetchError.emptyBatch but no error was thrown")
         } catch BlockFetchError.emptyBatch {
             // expected
         } catch {
             Issue.record("Expected BlockFetchError.emptyBatch, got \(error)")
         }
+
+        try? await channel.close()
+        try? await node.stop()
     }
 
     // MARK: Single block
@@ -82,21 +92,22 @@ struct BlockFetchClientTests {
         config.blockFetchBlocks = [body]
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let node = try await MockCardanoNode(config: config, group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, demux) = try await connectAndHandshakeNtN(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
-        let blocks = try await BlockFetchClient(channel: channel, demux: demux)
+        let blocks: [ByteBuffer] = try await BlockFetchClient(channel: channel, demux: demux)
             .fetch(from: .origin, to: .origin)
 
         #expect(blocks.count == 1)
         #expect(blocks[0].readableBytes == 4)
         var copy = blocks[0]
         #expect(copy.readBytes(length: 4) == [0xDE, 0xAD, 0xBE, 0xEF])
+
+        try? await channel.close()
+        try? await node.stop()
     }
 
     // MARK: Multiple blocks
@@ -111,23 +122,24 @@ struct BlockFetchClientTests {
         config.blockFetchBlocks = [b1, b2, b3]
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let node = try await MockCardanoNode(config: config, group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, demux) = try await connectAndHandshakeNtN(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         let from = Point.blockPoint(slot: 1_000, hash: Array(repeating: 0xAA, count: 32))
         let to = Point.blockPoint(slot: 3_000, hash: Array(repeating: 0xBB, count: 32))
-        let blocks = try await BlockFetchClient(channel: channel, demux: demux)
+        let blocks: [ByteBuffer] = try await BlockFetchClient(channel: channel, demux: demux)
             .fetch(from: from, to: to)
 
         #expect(blocks.count == 3)
         #expect(blocks[0].readableBytes == 3)
         #expect(blocks[1].readableBytes == 2)
         #expect(blocks[2].readableBytes == 1)
+
+        try? await channel.close()
+        try? await node.stop()
     }
 
     // MARK: Point variants
@@ -140,20 +152,21 @@ struct BlockFetchClientTests {
         config.blockFetchBlocks = [body]
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let node = try await MockCardanoNode(config: config, group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, demux) = try await connectAndHandshakeNtN(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         let to = Point.blockPoint(slot: 990, hash: Array(repeating: 0x55, count: 32))
-        let blocks = try await BlockFetchClient(channel: channel, demux: demux)
+        let blocks: [ByteBuffer] = try await BlockFetchClient(channel: channel, demux: demux)
             .fetch(from: .origin, to: to)
 
         #expect(blocks.count == 1)
         #expect(blocks[0].readableBytes == 2)
+
+        try? await channel.close()
+        try? await node.stop()
     }
 
     // MARK: Empty body
@@ -166,19 +179,20 @@ struct BlockFetchClientTests {
         config.blockFetchBlocks = [emptyBody]
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let node = try await MockCardanoNode(config: config, group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, demux) = try await connectAndHandshakeNtN(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
-        let blocks = try await BlockFetchClient(channel: channel, demux: demux)
+        let blocks: [ByteBuffer] = try await BlockFetchClient(channel: channel, demux: demux)
             .fetch(from: .origin, to: .origin)
 
         #expect(blocks.count == 1)
         #expect(blocks[0].readableBytes == 0)
+
+        try? await channel.close()
+        try? await node.stop()
     }
 
     // MARK: noBlocks at blockPoint range
@@ -189,24 +203,26 @@ struct BlockFetchClientTests {
         config.blockFetchBlocks = []
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { Task { try? await group.shutdownGracefully() } }
+        defer { shutdownEventLoopGroup(group) }
 
         let node = try await MockCardanoNode(config: config, group: group)
-        defer { Task { try? await node.stop() } }
 
         let (channel, demux) = try await connectAndHandshakeNtN(port: node.port, group: group)
-        defer { Task { try? await channel.close() } }
 
         let from = Point.blockPoint(slot: 1_000_000, hash: Array(repeating: 0x11, count: 32))
         let to = Point.blockPoint(slot: 2_000_000, hash: Array(repeating: 0x22, count: 32))
 
         do {
-            _ = try await BlockFetchClient(channel: channel, demux: demux).fetch(from: from, to: to)
+            let _: [ByteBuffer] = try await BlockFetchClient(channel: channel, demux: demux).fetch(
+                from: from, to: to)
             Issue.record("Expected BlockFetchError.emptyBatch but no error was thrown")
         } catch BlockFetchError.emptyBatch {
             // expected
         } catch {
             Issue.record("Expected BlockFetchError.emptyBatch, got \(error)")
         }
+
+        try? await channel.close()
+        try? await node.stop()
     }
 }

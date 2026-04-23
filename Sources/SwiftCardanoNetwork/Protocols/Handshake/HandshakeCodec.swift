@@ -56,8 +56,9 @@ public struct HandshakeCodec: ProtocolCodec, Sendable {
 
     // MARK: - Decode
 
-    public func decode(_ buffer: ByteBuffer) throws -> HandshakeMessage {
+    public func decode(_ buffer: inout ByteBuffer) throws -> HandshakeMessage {
         var buf = buffer
+        defer { buffer = buf }
         // Outer array header [tag, ...]
         let outerLen = try readCBORArrayHeader(from: &buf)
         guard outerLen >= 2 else { throw HandshakeError.malformedMessage }

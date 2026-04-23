@@ -21,9 +21,8 @@ private struct MockCodec: ProtocolCodec, Sendable {
         return buf
     }
 
-    func decode(_ buffer: ByteBuffer) throws -> MockMessage {
-        var buf = buffer
-        guard let v = buf.readInteger(as: UInt8.self) else { throw MockCodecError.truncated }
+    func decode(_ buffer: inout ByteBuffer) throws -> MockMessage {
+        guard let v = buffer.readInteger(as: UInt8.self) else { throw MockCodecError.truncated }
         return MockMessage(value: v)
     }
 }

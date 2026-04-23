@@ -14,9 +14,13 @@ import NIOCore
 /// msgIntersectNotFound = [6, tip]
 /// msgDone              = [7]
 ///
-/// wrappedBlock = [era, encodedBlock]     ; era: 0=Byron … 6=Conway
-/// encodedBlock = #6.24(bytes)            ; CBOR tag 24 — embedded CBOR (Shelley+)
-///              / bytes                   ; raw CBOR (Byron, fallback)
+/// ; NtC (node-to-client): full blocks wrapped in an outer tag-24
+/// wrappedBlock = #6.24(bstr)             ; bstr = CBOR of [era, #6.24(block_bytes)]
+///
+/// ; NtN (node-to-node): headers as a plain era-prefixed array
+/// wrappedBlock = [era, encodedHeader]    ; era: 0=Byron … 6=Conway
+/// encodedHeader = #6.24(bytes)           ; CBOR tag 24 — embedded CBOR (Shelley+)
+///               / bytes                  ; raw CBOR (Byron, fallback)
 ///
 /// tip   = [point, blockNo]
 /// point = []                             ; origin
@@ -29,7 +33,9 @@ public struct ChainSyncCodec: ProtocolCodec, Sendable {
 
     // MARK: - Encode
 
-    public func encode(_ message: ChainSyncMessage, allocator: ByteBufferAllocator) throws -> ByteBuffer {
+    public func encode(_ message: ChainSyncMessage, allocator: ByteBufferAllocator) throws
+        -> ByteBuffer
+    {
         var buf = allocator.buffer(capacity: 64)
 
         switch message {
@@ -57,52 +63,72 @@ public struct ChainSyncCodec: ProtocolCodec, Sendable {
 
     // MARK: - Decode
 
-    public func decode(_ buffer: ByteBuffer) throws -> ChainSyncMessage {
-        var buf = buffer
-        let arrayLen = try CBORLite.readArrayHeader(from: &buf)
-        let tag      = try CBORLite.readUInt(from: &buf)
+    public func decode(_ buffer: inout ByteBuffer) throws -> ChainSyncMessage {
+        let arrayLen = try CBORLite.readArrayHeader(from: &buffer)
+        let tag = try CBORLite.readUInt(from: &buffer)
 
         switch tag {
         case 0:
-            guard arrayLen == 1 else { throw ChainSyncError.unexpectedArrayLength(Int(arrayLen)) }
+            guard arrayLen == 1 || arrayLen == -1 else {
+                throw ChainSyncError.unexpectedArrayLength(Int(arrayLen))
+            }
             return .requestNext
 
         case 1:
-            guard arrayLen == 1 else { throw ChainSyncError.unexpectedArrayLength(Int(arrayLen)) }
+            guard arrayLen == 1 || arrayLen == -1 else {
+                throw ChainSyncError.unexpectedArrayLength(Int(arrayLen))
+            }
             return .awaitReply
 
         case 2:
-            guard arrayLen == 3 else { throw ChainSyncError.unexpectedArrayLength(Int(arrayLen)) }
-            let block = try readWrappedBlock(from: &buf)
-            let tip   = try readTip(from: &buf)
+            guard arrayLen == 3 || arrayLen == -1 else {
+                throw ChainSyncError.unexpectedArrayLength(Int(arrayLen))
+            }
+            let block = try readWrappedBlock(from: &buffer)
+            let tip = try readTip(from: &buffer)
             return .rollForward(block, tip)
 
         case 3:
-            guard arrayLen == 3 else { throw ChainSyncError.unexpectedArrayLength(Int(arrayLen)) }
-            let point = try readPoint(from: &buf)
-            let tip   = try readTip(from: &buf)
+            guard arrayLen == 3 || arrayLen == -1 else {
+                throw ChainSyncError.unexpectedArrayLength(Int(arrayLen))
+            }
+            let point = try readPoint(from: &buffer)
+            let tip = try readTip(from: &buffer)
             return .rollBackward(point, tip)
 
         case 4:
-            let count  = try CBORLite.readArrayHeader(from: &buf)
+            let count = try CBORLite.readArrayHeader(from: &buffer)
             var points = [Point]()
-            points.reserveCapacity(count)
-            for _ in 0..<count { try points.append(readPoint(from: &buf)) }
+            if count >= 0 {
+                points.reserveCapacity(count)
+                for _ in 0..<count { try points.append(readPoint(from: &buffer)) }
+            } else {
+                while !CBORLite.peekIsBreak(buffer) && buffer.readableBytes > 0 {
+                    try points.append(readPoint(from: &buffer))
+                }
+                CBORLite.skipBreakIfPresent(from: &buffer)
+            }
             return .findIntersect(points)
 
         case 5:
-            guard arrayLen == 3 else { throw ChainSyncError.unexpectedArrayLength(Int(arrayLen)) }
-            let point = try readPoint(from: &buf)
-            let tip   = try readTip(from: &buf)
+            guard arrayLen == 3 || arrayLen == -1 else {
+                throw ChainSyncError.unexpectedArrayLength(Int(arrayLen))
+            }
+            let point = try readPoint(from: &buffer)
+            let tip = try readTip(from: &buffer)
             return .intersectFound(point, tip)
 
         case 6:
-            guard arrayLen == 2 else { throw ChainSyncError.unexpectedArrayLength(Int(arrayLen)) }
-            let tip = try readTip(from: &buf)
+            guard arrayLen == 2 || arrayLen == -1 else {
+                throw ChainSyncError.unexpectedArrayLength(Int(arrayLen))
+            }
+            let tip = try readTip(from: &buffer)
             return .intersectNotFound(tip)
 
         case 7:
-            guard arrayLen == 1 else { throw ChainSyncError.unexpectedArrayLength(Int(arrayLen)) }
+            guard arrayLen == 1 || arrayLen == -1 else {
+                throw ChainSyncError.unexpectedArrayLength(Int(arrayLen))
+            }
             return .done
 
         default:
@@ -194,6 +220,16 @@ public struct ChainSyncCodec: ProtocolCodec, Sendable {
             let slot = try CBORLite.readUInt(from: &buf)
             let hash = try CBORLite.readByteString(from: &buf)
             return .blockPoint(slot: slot, hash: hash)
+        case -1:
+            // Indefinite-length: if next byte is break (0xFF) it's origin; otherwise blockPoint.
+            if CBORLite.peekIsBreak(buf) {
+                CBORLite.skipBreakIfPresent(from: &buf)
+                return .origin
+            }
+            let slot = try CBORLite.readUInt(from: &buf)
+            let hash = try CBORLite.readByteString(from: &buf)
+            CBORLite.skipBreakIfPresent(from: &buf)
+            return .blockPoint(slot: slot, hash: hash)
         default:
             throw ChainSyncError.malformedPoint(arrayLength: count)
         }
@@ -201,38 +237,87 @@ public struct ChainSyncCodec: ProtocolCodec, Sendable {
 
     private func readTip(from buf: inout ByteBuffer) throws -> Tip {
         let count = try CBORLite.readArrayHeader(from: &buf)
-        guard count == 2 else { throw ChainSyncError.malformedTip(arrayLength: count) }
-        let point   = try readPoint(from: &buf)
+        guard count == 2 || count == -1 else {
+            throw ChainSyncError.malformedTip(arrayLength: count)
+        }
+        let point = try readPoint(from: &buf)
         let blockNo = try CBORLite.readUInt(from: &buf)
+        CBORLite.skipBreakIfPresent(from: &buf)
         return Tip(point: point, blockNo: blockNo)
     }
 
-    /// Decode `[era, encodedBlock]` where `encodedBlock` is either:
-    /// - CBOR tag 24 wrapping a byte string (Shelley+), or
-    /// - a raw byte string (Byron / fallback).
+    /// Decode the wrapped block from a `RollForward` message.
+    ///
+    /// Two outer formats are supported:
+    ///
+    /// - **NtC (node-to-client)** — the whole wrapped block is an outer tag-24:
+    ///   `#6.24(bstr)` where `bstr` = CBOR of `[era, #6.24(block_bytes)]`.
+    ///   The outer tag-24 is stripped first, then the inner array is parsed.
+    ///
+    /// - **NtN (node-to-node)** — the wrapped block is a plain 2-element array:
+    ///   `[era, encodedHeader]` where `encodedHeader` may be a tag-24 byte
+    ///   string, a raw byte string, or a directly-embedded CBOR value.
     private func readWrappedBlock(from buf: inout ByteBuffer) throws -> RawBlock {
+        guard let outerMajor = CBORLite.peekMajorType(from: buf) else {
+            throw CBORError.truncated
+        }
+
+        // NtC: outer tag-24 wraps the entire [era, encodedBlock] structure.
+        if outerMajor == CBORLite.majorTag {
+            let tagNum = try CBORLite.readTag(from: &buf)
+            guard tagNum == 24 else {
+                throw ChainSyncError.malformedBlock(arrayLength: Int(tagNum))
+            }
+            var innerBuf = try CBORLite.readByteStringBuffer(from: &buf)
+            return try parseWrappedBlockArray(from: &innerBuf)
+        }
+
+        // NtN: plain [era, encodedHeader] array.
+        return try parseWrappedBlockArray(from: &buf)
+    }
+
+    /// Parse `[era, encodedBlock]` and return a `RawBlock`.
+    ///
+    /// `encodedBlock` may be:
+    /// - CBOR tag 24 wrapping a byte string (Shelley+ full blocks or headers)
+    /// - a raw byte string (Byron / fallback)
+    /// - a directly-embedded CBOR value (NtN headers without tag-24)
+    private func parseWrappedBlockArray(from buf: inout ByteBuffer) throws -> RawBlock {
         let wrapCount = try CBORLite.readArrayHeader(from: &buf)
-        guard wrapCount == 2 else { throw ChainSyncError.malformedBlock(arrayLength: wrapCount) }
+        guard wrapCount == 2 || wrapCount == -1 else {
+            throw ChainSyncError.malformedBlock(arrayLength: wrapCount)
+        }
         let era = try CBORLite.readUInt(from: &buf)
 
-        // Peek at the next byte to distinguish tag 24 from a plain byte string.
         let rawCBOR: ByteBuffer
-        if let first = CBORLite.peekMajorType(from: buf), first == CBORLite.majorTag {
+        guard let majorType = CBORLite.peekMajorType(from: buf) else {
+            throw CBORError.truncated
+        }
+
+        switch majorType {
+        case CBORLite.majorTag:
             let tagNum = try CBORLite.readTag(from: &buf)
             if tagNum == 24 {
-                // Tag 24 = embedded CBOR: the value is a byte string containing the block.
+                // Tag 24 = embedded CBOR: the byte string content IS the raw CBOR bytes.
                 rawCBOR = try CBORLite.readByteStringBuffer(from: &buf)
             } else {
-                // Unknown tag — skip it and take remaining bytes.
+                // Unknown tag — skip the tagged value and take remaining bytes.
                 try CBORLite.skipValue(in: &buf)
                 rawCBOR = buf
                 buf.moveReaderIndex(forwardBy: buf.readableBytes)
             }
-        } else {
-            // Plain byte string (Byron).
+        case CBORLite.majorByteString:
+            // Plain byte string (Byron or pre-tag-24 fallback).
             rawCBOR = try CBORLite.readByteStringBuffer(from: &buf)
+        default:
+            // Directly-embedded CBOR value — most commonly an NtN block header
+            // sent as a plain array [header_body, kes_signature] without tag-24.
+            // Capture the entire value as raw CBOR bytes.
+            rawCBOR = try CBORLite.readValueBuffer(from: &buf)
         }
 
+        // Consume break byte if the [era, block] array was indefinite-length.
+        CBORLite.skipBreakIfPresent(from: &buf)
         return RawBlock(era: era, rawCBOR: rawCBOR)
     }
 }

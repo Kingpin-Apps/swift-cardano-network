@@ -12,14 +12,14 @@ enum CBORLite {
 
     // MARK: - CBOR major types
 
-    static let majorUInt:       UInt8 = 0
-    static let majorNInt:       UInt8 = 1
+    static let majorUInt: UInt8 = 0
+    static let majorNInt: UInt8 = 1
     static let majorByteString: UInt8 = 2
     static let majorTextString: UInt8 = 3
-    static let majorArray:      UInt8 = 4
-    static let majorMap:        UInt8 = 5
-    static let majorTag:        UInt8 = 6
-    static let majorSimple:     UInt8 = 7
+    static let majorArray: UInt8 = 4
+    static let majorMap: UInt8 = 5
+    static let majorTag: UInt8 = 6
+    static let majorSimple: UInt8 = 7
 
     // MARK: - Write helpers
 
@@ -80,6 +80,18 @@ enum CBORLite {
         buf.getInteger(at: buf.readerIndex, as: UInt8.self) == 0xF6
     }
 
+    /// Return `true` if the next byte is the CBOR break code (0xFF) without consuming it.
+    static func peekIsBreak(_ buf: ByteBuffer) -> Bool {
+        buf.getInteger(at: buf.readerIndex, as: UInt8.self) == 0xFF
+    }
+
+    /// Consume the CBOR break byte (0xFF) if it is the next byte in the buffer.
+    static func skipBreakIfPresent(from buf: inout ByteBuffer) {
+        if buf.getInteger(at: buf.readerIndex, as: UInt8.self) == 0xFF {
+            buf.moveReaderIndex(forwardBy: 1)
+        }
+    }
+
     /// Consume the CBOR null simple value (0xF6).
     static func readNull(from buf: inout ByteBuffer) throws {
         let b = try readByte(from: &buf)
@@ -89,24 +101,47 @@ enum CBORLite {
     /// Read and return an unsigned integer (major type 0).
     static func readUInt(from buf: inout ByteBuffer) throws -> UInt64 {
         let initial = try readByte(from: &buf)
-        guard (initial >> 5) == majorUInt else { throw CBORError.typeMismatch(expected: "uint", got: initial) }
+        guard (initial >> 5) == majorUInt else {
+            throw CBORError.typeMismatch(expected: "uint", got: initial)
+        }
         return try readAdditionalInfo(initial & 0x1F, from: &buf)
     }
 
     /// Read and return a byte string (major type 2) as `[UInt8]`.
     static func readByteString(from buf: inout ByteBuffer) throws -> [UInt8] {
         let initial = try readByte(from: &buf)
-        guard (initial >> 5) == majorByteString else { throw CBORError.typeMismatch(expected: "bytes", got: initial) }
+        guard (initial >> 5) == majorByteString else {
+            throw CBORError.typeMismatch(expected: "bytes", got: initial)
+        }
         let length = Int(try readAdditionalInfo(initial & 0x1F, from: &buf))
         guard let bytes = buf.readBytes(length: length) else { throw CBORError.truncated }
         return bytes
     }
 
     /// Read and return a byte string (major type 2) as a `ByteBuffer` slice.
+    /// Supports both definite-length and indefinite-length (chunked) encoding.
     static func readByteStringBuffer(from buf: inout ByteBuffer) throws -> ByteBuffer {
         let initial = try readByte(from: &buf)
-        guard (initial >> 5) == majorByteString else { throw CBORError.typeMismatch(expected: "bytes", got: initial) }
-        let length = Int(try readAdditionalInfo(initial & 0x1F, from: &buf))
+        guard (initial >> 5) == majorByteString else {
+            throw CBORError.typeMismatch(expected: "bytes", got: initial)
+        }
+        let info = initial & 0x1F
+        if info == 31 {
+            // Indefinite-length: collect definite chunks until break (0xFF).
+            var result = ByteBuffer()
+            while true {
+                guard let next = buf.readInteger(as: UInt8.self) else { throw CBORError.truncated }
+                if next == 0xFF { break }
+                guard (next >> 5) == majorByteString else {
+                    throw CBORError.typeMismatch(expected: "bytes chunk", got: next)
+                }
+                let chunkLen = Int(try readAdditionalInfo(next & 0x1F, from: &buf))
+                guard var chunk = buf.readSlice(length: chunkLen) else { throw CBORError.truncated }
+                result.writeBuffer(&chunk)
+            }
+            return result
+        }
+        let length = Int(try readAdditionalInfo(info, from: &buf))
         guard let slice = buf.readSlice(length: length) else { throw CBORError.truncated }
         return slice
     }
@@ -114,30 +149,42 @@ enum CBORLite {
     /// Read and return a text string (major type 3).
     static func readText(from buf: inout ByteBuffer) throws -> String {
         let initial = try readByte(from: &buf)
-        guard (initial >> 5) == majorTextString else { throw CBORError.typeMismatch(expected: "text", got: initial) }
+        guard (initial >> 5) == majorTextString else {
+            throw CBORError.typeMismatch(expected: "text", got: initial)
+        }
         let length = Int(try readAdditionalInfo(initial & 0x1F, from: &buf))
         guard let bytes = buf.readBytes(length: length) else { throw CBORError.truncated }
         return String(bytes: bytes, encoding: .utf8) ?? ""
     }
 
-    /// Read an array header (major type 4); returns the element count.
+    /// Read an array header (major type 4); returns the element count, or -1 for indefinite-length.
     static func readArrayHeader(from buf: inout ByteBuffer) throws -> Int {
         let initial = try readByte(from: &buf)
-        guard (initial >> 5) == majorArray else { throw CBORError.typeMismatch(expected: "array", got: initial) }
-        return Int(try readAdditionalInfo(initial & 0x1F, from: &buf))
+        guard (initial >> 5) == majorArray else {
+            throw CBORError.typeMismatch(expected: "array", got: initial)
+        }
+        let info = initial & 0x1F
+        if info == 31 { return -1 }  // indefinite-length
+        return Int(try readAdditionalInfo(info, from: &buf))
     }
 
-    /// Read a map header (major type 5); returns the pair count.
+    /// Read a map header (major type 5); returns the pair count, or -1 for indefinite-length.
     static func readMapHeader(from buf: inout ByteBuffer) throws -> Int {
         let initial = try readByte(from: &buf)
-        guard (initial >> 5) == majorMap else { throw CBORError.typeMismatch(expected: "map", got: initial) }
-        return Int(try readAdditionalInfo(initial & 0x1F, from: &buf))
+        guard (initial >> 5) == majorMap else {
+            throw CBORError.typeMismatch(expected: "map", got: initial)
+        }
+        let info = initial & 0x1F
+        if info == 31 { return -1 }  // indefinite-length
+        return Int(try readAdditionalInfo(info, from: &buf))
     }
 
     /// Read a CBOR tag (major type 6); returns the tag number.
     static func readTag(from buf: inout ByteBuffer) throws -> UInt64 {
         let initial = try readByte(from: &buf)
-        guard (initial >> 5) == majorTag else { throw CBORError.typeMismatch(expected: "tag", got: initial) }
+        guard (initial >> 5) == majorTag else {
+            throw CBORError.typeMismatch(expected: "tag", got: initial)
+        }
         return try readAdditionalInfo(initial & 0x1F, from: &buf)
     }
 
@@ -159,7 +206,7 @@ enum CBORLite {
         switch b {
         case 0xF4: return false
         case 0xF5: return true
-        default:   throw CBORError.typeMismatch(expected: "bool", got: b)
+        default: throw CBORError.typeMismatch(expected: "bool", got: b)
         }
     }
 
@@ -186,11 +233,58 @@ enum CBORLite {
     // MARK: - Skip a complete CBOR value
 
     /// Advance `buf.readerIndex` past exactly one CBOR value (any type, including
-    /// arrays/maps recursively).
+    /// arrays/maps recursively). Supports indefinite-length encoding (info == 31).
     static func skipValue(in buf: inout ByteBuffer) throws {
         let initial = try readByte(from: &buf)
         let major = initial >> 5
-        let info  = initial & 0x1F
+        let info = initial & 0x1F
+
+        // Indefinite-length encoding (info == 31) — handle per major type.
+        if info == 31 {
+            switch major {
+            case majorByteString, majorTextString:
+                // Chunked: read definite-length chunks until break (0xFF).
+                while true {
+                    guard let next = buf.readInteger(as: UInt8.self) else {
+                        throw CBORError.truncated
+                    }
+                    if next == 0xFF { return }
+                    let chunkLen = Int(try readAdditionalInfo(next & 0x1F, from: &buf))
+                    guard buf.readableBytes >= chunkLen else { throw CBORError.truncated }
+                    buf.moveReaderIndex(forwardBy: chunkLen)
+                }
+            case majorArray:
+                while true {
+                    guard let peek = buf.getInteger(at: buf.readerIndex, as: UInt8.self) else {
+                        throw CBORError.truncated
+                    }
+                    if peek == 0xFF {
+                        buf.moveReaderIndex(forwardBy: 1)
+                        return
+                    }
+                    try skipValue(in: &buf)
+                }
+            case majorMap:
+                while true {
+                    guard let peek = buf.getInteger(at: buf.readerIndex, as: UInt8.self) else {
+                        throw CBORError.truncated
+                    }
+                    if peek == 0xFF {
+                        buf.moveReaderIndex(forwardBy: 1)
+                        return
+                    }
+                    try skipValue(in: &buf)  // key
+                    try skipValue(in: &buf)  // value
+                }
+            case majorSimple:
+                // 0xFF is the break code — treated as consumed by the initial readByte.
+                return
+            default:
+                throw CBORError.unsupportedMajorType(major)
+            }
+            return
+        }
+
         let count = Int(try readAdditionalInfo(info, from: &buf))
 
         switch major {
@@ -234,20 +328,28 @@ enum CBORLite {
         return b
     }
 
-    private static func readAdditionalInfo(_ info: UInt8, from buf: inout ByteBuffer) throws -> UInt64 {
+    private static func readAdditionalInfo(_ info: UInt8, from buf: inout ByteBuffer) throws
+        -> UInt64
+    {
         switch info {
         case 0...23: return UInt64(info)
         case 24:
-            guard let v = buf.readInteger(as: UInt8.self)  else { throw CBORError.truncated }
+            guard let v = buf.readInteger(as: UInt8.self) else { throw CBORError.truncated }
             return UInt64(v)
         case 25:
-            guard let v = buf.readInteger(endianness: .big, as: UInt16.self) else { throw CBORError.truncated }
+            guard let v = buf.readInteger(endianness: .big, as: UInt16.self) else {
+                throw CBORError.truncated
+            }
             return UInt64(v)
         case 26:
-            guard let v = buf.readInteger(endianness: .big, as: UInt32.self) else { throw CBORError.truncated }
+            guard let v = buf.readInteger(endianness: .big, as: UInt32.self) else {
+                throw CBORError.truncated
+            }
             return UInt64(v)
         case 27:
-            guard let v = buf.readInteger(endianness: .big, as: UInt64.self) else { throw CBORError.truncated }
+            guard let v = buf.readInteger(endianness: .big, as: UInt64.self) else {
+                throw CBORError.truncated
+            }
             return v
         default:
             throw CBORError.unsupportedAdditionalInfo(info)

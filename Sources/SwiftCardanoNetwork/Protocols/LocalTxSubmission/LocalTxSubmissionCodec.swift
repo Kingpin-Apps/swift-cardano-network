@@ -50,8 +50,9 @@ public struct LocalTxSubmissionCodec: ProtocolCodec, Sendable {
 
     // MARK: - Decode
 
-    public func decode(_ buffer: ByteBuffer) throws -> LocalTxSubmissionMessage {
+    public func decode(_ buffer: inout ByteBuffer) throws -> LocalTxSubmissionMessage {
         var buf = buffer
+        defer { buffer = buf }
         let arrayLen = try CBORLite.readArrayHeader(from: &buf)
         let tag      = try CBORLite.readUInt(from: &buf)
 

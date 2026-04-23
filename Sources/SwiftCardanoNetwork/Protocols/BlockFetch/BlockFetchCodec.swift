@@ -23,7 +23,9 @@ public struct BlockFetchCodec: ProtocolCodec, Sendable {
 
     // MARK: - Encode
 
-    public func encode(_ message: BlockFetchMessage, allocator: ByteBufferAllocator) throws -> ByteBuffer {
+    public func encode(_ message: BlockFetchMessage, allocator: ByteBufferAllocator) throws
+        -> ByteBuffer
+    {
         var buf = allocator.buffer(capacity: 64)
 
         switch message {
@@ -62,16 +64,15 @@ public struct BlockFetchCodec: ProtocolCodec, Sendable {
 
     // MARK: - Decode
 
-    public func decode(_ buffer: ByteBuffer) throws -> BlockFetchMessage {
-        var buf = buffer
-        let arrayLen = try CBORLite.readArrayHeader(from: &buf)
-        let tag      = try CBORLite.readUInt(from: &buf)
+    public func decode(_ buffer: inout ByteBuffer) throws -> BlockFetchMessage {
+        let arrayLen = try CBORLite.readArrayHeader(from: &buffer)
+        let tag = try CBORLite.readUInt(from: &buffer)
 
         switch tag {
         case 0:
             guard arrayLen == 3 else { throw BlockFetchError.unexpectedArrayLength(arrayLen) }
-            let from = try readPoint(from: &buf)
-            let to   = try readPoint(from: &buf)
+            let from = try readPoint(from: &buffer)
+            let to = try readPoint(from: &buffer)
             return .requestRange(from: from, to: to)
 
         case 1:
@@ -88,7 +89,7 @@ public struct BlockFetchCodec: ProtocolCodec, Sendable {
 
         case 4:
             guard arrayLen == 2 else { throw BlockFetchError.unexpectedArrayLength(arrayLen) }
-            let body = try readBlockBody(from: &buf)
+            let body = try readBlockBody(from: &buffer)
             return .block(body)
 
         case 5:

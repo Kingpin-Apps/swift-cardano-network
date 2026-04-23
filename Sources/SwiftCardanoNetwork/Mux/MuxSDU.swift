@@ -52,5 +52,12 @@ public extension MuxSDU {
         public static let keepAlive:          UInt16 = 8
         public static let localTxMonitor:     UInt16 = 9
         public static let peerSharing:        UInt16 = 10
+
+        // MARK: - Dummy protocols (§3.5 of the network spec)
+        // Not used by NtN or NtC; reserved for demos, tests, and framework
+        // familiarisation only. Values are placed at the top of the 15-bit
+        // mini-protocol namespace so they cannot collide with production IDs.
+        public static let pingPong:           UInt16 = 0x7FFE
+        public static let reqResp:            UInt16 = 0x7FFD
     }
 }
