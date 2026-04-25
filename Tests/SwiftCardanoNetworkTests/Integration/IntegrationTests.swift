@@ -264,7 +264,7 @@ struct IntegrationTests {
     func localStateQueryReturnsResult() async throws {
         var config = MockNodeConfig()
         var resultBuf = alloc.buffer(capacity: 3)
-        resultBuf.writeBytes([0x83, 0x01, 0x02])  // CBOR [1, 2]
+        resultBuf.writeBytes([0x82, 0x01, 0x02])  // CBOR [1, 2] — array(2) + uint(1) + uint(2)
         config.queryResult = RawResult(era: 6, rawCBOR: resultBuf)
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
@@ -277,7 +277,7 @@ struct IntegrationTests {
         let client = LocalStateQueryClient(channel: channel, demux: demux)
         let result = try await client.query(.raw(makeRawQuery()))
 
-        #expect(result.era == 6)
+        // Era is not preserved in the QueryIfCurrent success envelope.
         #expect(result.rawCBOR.readableBytes == 3)
     }
 
@@ -293,7 +293,7 @@ struct IntegrationTests {
         let client = LocalStateQueryClient(channel: channel, demux: demux)
         let result = try await client.query(.raw(makeRawQuery()), at: .volatileTip)
 
-        #expect(result.era == 6)
+        #expect(result.rawCBOR.readableBytes > 0)
     }
 
     @Test("LocalStateQuery: query at specific chain point succeeds")
@@ -325,7 +325,7 @@ struct IntegrationTests {
         let client = LocalStateQueryClient(channel: channel, demux: demux)
         for era in [UInt16(4), 5, 6] {
             let r = try await client.query(.raw(makeRawQuery(era: era)))
-            #expect(r.era == 6)  // mock always returns era 6
+            #expect(r.rawCBOR.readableBytes > 0)
         }
     }
 
@@ -469,7 +469,7 @@ struct IntegrationTests {
         // Ledger query
         let qClient = LocalStateQueryClient(channel: channel, demux: demux)
         let result = try await qClient.query(.raw(makeRawQuery()))
-        #expect(result.era == 6)
+        #expect(result.rawCBOR.readableBytes > 0)
 
         // Mempool snapshot
         let mClient = LocalTxMonitorClient(channel: channel, demux: demux)

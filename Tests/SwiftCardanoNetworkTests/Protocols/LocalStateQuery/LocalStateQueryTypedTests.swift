@@ -294,35 +294,18 @@ struct LocalStateQueryClientTypedTests {
         try? await node.stop()
     }
 
-    // MARK: - queryProtocolParametersRaw
+    // MARK: - queryPoolDistr
 
-    @Test("queryProtocolParametersRaw: returns the raw result bytes unchanged")
-    func queryProtocolParametersRawReturnsResult() async throws {
-        let payload: [UInt8] = [0x83, 0x01, 0x02]  // any 3 bytes
+    @Test("queryPoolDistr: decodes an empty pool distribution map")
+    func queryPoolDistrDecodesEmptyMap() async throws {
+        let payload: [UInt8] = [0xa0]  // CBOR empty map {}
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         defer { shutdownEventLoopGroup(group) }
         let node = try await makeNode(resultBytes: payload, group: group)
         let (channel, client) = try await makeClient(port: node.port, group: group)
 
-        let result = try await client.queryProtocolParametersRaw()
-        #expect(result.rawCBOR.readableBytes == 3)
-
-        try? await channel.close()
-        try? await node.stop()
-    }
-
-    // MARK: - queryStakeDistribution
-
-    @Test("queryStakeDistribution: returns raw CBOR result unchanged")
-    func queryStakeDistributionReturnsRawResult() async throws {
-        let payload: [UInt8] = [0x80, 0x01]  // any 2 bytes
-        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        defer { shutdownEventLoopGroup(group) }
-        let node = try await makeNode(resultBytes: payload, group: group)
-        let (channel, client) = try await makeClient(port: node.port, group: group)
-
-        let result = try await client.queryStakeDistribution()
-        #expect(result.rawCBOR.readableBytes == 2)
+        let result = try await client.queryPoolDistr()
+        #expect(result.entries.isEmpty)
 
         try? await channel.close()
         try? await node.stop()
@@ -330,16 +313,18 @@ struct LocalStateQueryClientTypedTests {
 
     // MARK: - queryGovernanceState
 
-    @Test("queryGovernanceState: returns raw CBOR result unchanged")
-    func queryGovernanceStateReturnsRawResult() async throws {
-        let payload: [UInt8] = [0x80, 0x02]  // any 2 bytes
+    @Test("queryGovernanceState: throws on invalid CBOR payload")
+    func queryGovernanceStateThrowsOnInvalidPayload() async throws {
+        // GovernanceState now requires a list[7]; an empty map is an invalid payload.
+        let payload: [UInt8] = [0xa0]  // CBOR empty map — not a valid GovernanceState
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         defer { shutdownEventLoopGroup(group) }
         let node = try await makeNode(resultBytes: payload, group: group)
         let (channel, client) = try await makeClient(port: node.port, group: group)
 
-        let result = try await client.queryGovernanceState()
-        #expect(result.rawCBOR.readableBytes == 2)
+        await #expect(throws: (any Error).self) {
+            _ = try await client.queryGovernanceState()
+        }
 
         try? await channel.close()
         try? await node.stop()

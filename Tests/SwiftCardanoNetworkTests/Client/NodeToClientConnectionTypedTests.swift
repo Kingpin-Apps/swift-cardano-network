@@ -206,3 +206,125 @@ struct NodeToClientConnectionTypedTests {
         try? await node.stop()
     }
 }
+
+// MARK: - Live GovernanceState decode test
+
+private func previewSocketReachable(path: String) -> Bool {
+    FileManager.default.fileExists(atPath: path)
+}
+
+private let previewSocket = "/Users/hadderley/cardano/preview/socket/node.socket"
+
+@Suite(
+    "GovernanceState live decode",
+    .enabled(if: previewSocketReachable(path: previewSocket), "No live preview socket"),
+    .serialized
+)
+struct GovernanceStateLiveTests {
+
+    @Test("queryGovernanceState: decodes fully from live preview node")
+    func queryGovernanceStateDecodes() async throws {
+        var connConfig = ConnectionConfig()
+        connConfig.socketPath = previewSocket
+        connConfig.networkMagic = 2
+
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+        defer { shutdownEventLoopGroup(group) }
+
+        var cfg = CardanoNetworkConfiguration()
+        cfg.connection = connConfig
+
+        let conn = try await CardanoNode.connectToClient(config: cfg, group: group)
+        defer { Task { await conn.close() } }
+
+        let state = try await conn.queryGovernanceState()
+
+        // Basic sanity checks on the decoded state
+        #expect(state.currentPParams.txFeeFixed > 0)
+        #expect(state.constitution.anchor.anchorUrl.value.absoluteString.isEmpty == false)
+        #expect(state.proposals.proposals.count >= 0)
+
+        await conn.close()
+    }
+}
+
+// MARK: - RatifyState live decode test
+
+@Suite(
+    "RatifyState live decode",
+    .enabled(if: previewSocketReachable(path: previewSocket), "No live preview socket"),
+    .serialized
+)
+struct RatifyStateLiveTests {
+
+    @Test("queryRatifyState: decodes fully from live preview node")
+    func queryRatifyStateDecodes() async throws {
+        var connConfig = ConnectionConfig()
+        connConfig.socketPath = previewSocket
+        connConfig.networkMagic = 2
+
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+        defer { shutdownEventLoopGroup(group) }
+
+        var cfg = CardanoNetworkConfiguration()
+        cfg.connection = connConfig
+
+        let conn = try await CardanoNode.connectToClient(config: cfg, group: group)
+        defer { Task { await conn.close() } }
+
+        let state = try await conn.queryRatifyState()
+
+        // Sanity checks
+        #expect(state.enactState.treasury >= 0)
+        #expect(state.enactState.currentPParams.txFeeFixed > 0)
+        #expect(state.enactState.constitution.anchor.anchorUrl.value.absoluteString.isEmpty == false)
+        #expect(state.delayed == false || state.delayed == true)
+
+        await conn.close()
+    }
+}
+
+// MARK: - BigLedgerPeerSnapshot live decode test
+
+@Suite(
+    "BigLedgerPeerSnapshot live decode",
+    .enabled(if: previewSocketReachable(path: previewSocket), "No live preview socket"),
+    .serialized
+)
+struct BigLedgerPeerSnapshotLiveTests {
+
+    @Test("queryBigLedgerPeerSnapshot: decodes fully from live preview node")
+    func queryBigLedgerPeerSnapshotDecodes() async throws {
+        var connConfig = ConnectionConfig()
+        connConfig.socketPath = previewSocket
+        connConfig.networkMagic = 2
+
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+        defer { shutdownEventLoopGroup(group) }
+
+        var cfg = CardanoNetworkConfiguration()
+        cfg.connection = connConfig
+
+        let conn = try await CardanoNode.connectToClient(config: cfg, group: group)
+        defer { Task { await conn.close() } }
+
+        let snapshot = try await conn.queryBigLedgerPeerSnapshot()
+
+        #expect(snapshot.peers.isEmpty == false)
+        #expect(snapshot.snapshotSlot != nil)
+
+        var prev: Double = 0.0
+        for peer in snapshot.peers {
+            let acc = Double(peer.accumulatedRelativeStake.numerator) / Double(peer.accumulatedRelativeStake.denominator)
+            #expect(acc > prev)
+            prev = acc
+            #expect(peer.relays.isEmpty == false)
+            for relay in peer.relays {
+                #expect(relay.address.isEmpty == false)
+                #expect(relay.port > 0)
+            }
+        }
+
+        await conn.close()
+    }
+}

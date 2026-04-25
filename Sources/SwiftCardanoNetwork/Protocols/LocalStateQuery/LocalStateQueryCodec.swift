@@ -19,9 +19,11 @@ import NIOCore
 ///       / [slotNo, headerHash]                ; specific block
 /// ```
 ///
-/// The `[era, bstr]` pair mirrors the era-tagged encoding used in `ChainSync`
-/// and `LocalTxSubmission`: `era` is the Cardano era number (Conway=6) and
-/// `bstr` holds the CBOR-encoded query or result body.
+/// The query payload uses the Ouroboros BlockQuery/ShelleyQuery nesting:
+/// `[3, [0, [0, [era, <inline inner-query CBOR>]]]]` where the outer 0 is
+/// QueryTypeBlock and the inner 0 is QueryTypeShelley.
+/// The result payload is wrapped in a QueryIfCurrent success array:
+/// `[4, [[<raw result CBOR>]]]`.
 public struct LocalStateQueryCodec: ProtocolCodec, Sendable {
     public typealias Message = LocalStateQueryMessage
 
@@ -29,7 +31,9 @@ public struct LocalStateQueryCodec: ProtocolCodec, Sendable {
 
     // MARK: - Encode
 
-    public func encode(_ message: LocalStateQueryMessage, allocator: ByteBufferAllocator) throws -> ByteBuffer {
+    public func encode(_ message: LocalStateQueryMessage, allocator: ByteBufferAllocator) throws
+        -> ByteBuffer
+    {
         var buf = allocator.buffer(capacity: 64)
 
         switch message {
@@ -50,12 +54,12 @@ public struct LocalStateQueryCodec: ProtocolCodec, Sendable {
         case .query(let q):
             CBORLite.writeArrayHeader(count: 2, into: &buf)
             CBORLite.writeUInt(3, into: &buf)
-            writeEraTagged(era: UInt64(q.era), payload: q.rawCBOR, into: &buf)
+            writeBlockShelleyQuery(era: UInt64(q.era), payload: q.rawCBOR, into: &buf)
 
         case .result(let r):
             CBORLite.writeArrayHeader(count: 2, into: &buf)
             CBORLite.writeUInt(4, into: &buf)
-            writeEraTagged(era: UInt64(r.era), payload: r.rawCBOR, into: &buf)
+            writeQueryIfCurrentResult(payload: r.rawCBOR, into: &buf)
 
         case .release:
             CBORLite.writeArrayHeader(count: 1, into: &buf)
@@ -84,7 +88,7 @@ public struct LocalStateQueryCodec: ProtocolCodec, Sendable {
         var buf = buffer
         defer { buffer = buf }
         let arrayLen = try CBORLite.readArrayHeader(from: &buf)
-        let tag      = try CBORLite.readUInt(from: &buf)
+        let tag = try CBORLite.readUInt(from: &buf)
 
         switch tag {
         case 0:
@@ -106,13 +110,13 @@ public struct LocalStateQueryCodec: ProtocolCodec, Sendable {
 
         case 3:
             guard arrayLen == 2 else { throw LocalStateQueryError.unexpectedArrayLength(arrayLen) }
-            let (era, bytes) = try readEraTagged(from: &buf)
+            let (era, bytes) = try readBlockShelleyQuery(from: &buf)
             return .query(RawQuery(era: era, rawCBOR: bytes))
 
         case 4:
             guard arrayLen == 2 else { throw LocalStateQueryError.unexpectedArrayLength(arrayLen) }
-            let (era, bytes) = try readEraTagged(from: &buf)
-            return .result(RawResult(era: era, rawCBOR: bytes))
+            let bytes = try readQueryIfCurrentResult(from: &buf)
+            return .result(RawResult(era: 0, rawCBOR: bytes))
 
         case 5:
             guard arrayLen == 1 else { throw LocalStateQueryError.unexpectedArrayLength(arrayLen) }
@@ -163,17 +167,51 @@ public struct LocalStateQueryCodec: ProtocolCodec, Sendable {
         }
     }
 
-    private func writeEraTagged(era: UInt64, payload: ByteBuffer, into buf: inout ByteBuffer) {
-        CBORLite.writeArrayHeader(count: 2, into: &buf)
+    /// Write `[0, [0, [era, <inline payload bytes>]]]` — the NtC Ouroboros
+    /// BlockQuery (0) → ShelleyQuery (0) → era nesting for ledger queries.
+    /// The payload bytes are written inline (not wrapped as a CBOR byte string).
+    private func writeBlockShelleyQuery(
+        era: UInt64, payload: ByteBuffer, into buf: inout ByteBuffer
+    ) {
+        CBORLite.writeArrayHeader(count: 2, into: &buf)  // BlockQuery
+        CBORLite.writeUInt(0, into: &buf)
+        CBORLite.writeArrayHeader(count: 2, into: &buf)  // ShelleyQuery
+        CBORLite.writeUInt(0, into: &buf)
+        CBORLite.writeArrayHeader(count: 2, into: &buf)  // [era, inner]
         CBORLite.writeUInt(era, into: &buf)
-        CBORLite.writeByteBuffer(payload, into: &buf)
+        var src = payload
+        buf.writeBuffer(&src)
     }
 
-    private func readEraTagged(from buf: inout ByteBuffer) throws -> (UInt16, ByteBuffer) {
-        let len = try CBORLite.readArrayHeader(from: &buf)
-        guard len == 2 else { throw LocalStateQueryError.unexpectedArrayLength(len) }
-        let era   = UInt16(try CBORLite.readUInt(from: &buf))
-        let bytes = try CBORLite.readByteStringBuffer(from: &buf)
+    /// Write the QueryIfCurrent success envelope `[[payload_inline]]`.
+    /// Symmetric with `readQueryIfCurrentResult`.
+    private func writeQueryIfCurrentResult(payload: ByteBuffer, into buf: inout ByteBuffer) {
+        CBORLite.writeArrayHeader(count: 1, into: &buf)
+        var src = payload
+        buf.writeBuffer(&src)
+    }
+
+    /// Unwrap the QueryIfCurrent success envelope `[[<inner value>]]` returned
+    /// by the node for era-tagged queries, and return the inner value bytes.
+    private func readQueryIfCurrentResult(from buf: inout ByteBuffer) throws -> ByteBuffer {
+        let outerLen = try CBORLite.readArrayHeader(from: &buf)
+        guard outerLen == 1 else { throw LocalStateQueryError.unexpectedArrayLength(outerLen) }
+        return try CBORLite.readValueBuffer(from: &buf)
+    }
+
+    /// Decode an inbound `[0, [0, [era, <inner bytes>]]]` BlockQuery/ShelleyQuery
+    /// wrapper (symmetric counterpart of `writeBlockShelleyQuery`).
+    private func readBlockShelleyQuery(from buf: inout ByteBuffer) throws -> (UInt16, ByteBuffer) {
+        let blockLen = try CBORLite.readArrayHeader(from: &buf)
+        guard blockLen == 2 else { throw LocalStateQueryError.unexpectedArrayLength(blockLen) }
+        _ = try CBORLite.readUInt(from: &buf)  // BlockQuery type (0)
+        let shelleyLen = try CBORLite.readArrayHeader(from: &buf)
+        guard shelleyLen == 2 else { throw LocalStateQueryError.unexpectedArrayLength(shelleyLen) }
+        _ = try CBORLite.readUInt(from: &buf)  // ShelleyQuery type (0)
+        let innerLen = try CBORLite.readArrayHeader(from: &buf)
+        guard innerLen == 2 else { throw LocalStateQueryError.unexpectedArrayLength(innerLen) }
+        let era = UInt16(try CBORLite.readUInt(from: &buf))
+        let bytes = try CBORLite.readValueBuffer(from: &buf)
         return (era, bytes)
     }
 }

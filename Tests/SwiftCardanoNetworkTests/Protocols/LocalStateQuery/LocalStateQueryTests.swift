@@ -281,25 +281,28 @@ private let testHash: BlockHash = Array(repeating: 0xAB, count: 32)
     }
 
     @Test func queryRoundTrip() throws {
-        let q       = makeRawQuery(era: 6, bytes: [0xCA, 0xFE, 0xBA, 0xBE])
+        // Payload must be valid CBOR — the new format writes it inline.
+        // 0x80 = CBOR empty array, a single well-formed value.
+        let q       = makeRawQuery(era: 6, bytes: [0x80])
         let decoded = try roundTrip(.query(q))
         guard case .query(let r) = decoded else {
             Issue.record("Expected .query, got \(decoded)"); return
         }
         #expect(r.era == 6)
-        #expect(r.rawCBOR.readableBytes == 4)
-        #expect(r.rawCBOR.getBytes(at: r.rawCBOR.readerIndex, length: 4) == [0xCA, 0xFE, 0xBA, 0xBE])
+        #expect(r.rawCBOR.readableBytes == 1)
+        #expect(r.rawCBOR.getBytes(at: r.rawCBOR.readerIndex, length: 1) == [0x80])
     }
 
     @Test func resultRoundTrip() throws {
-        let res     = makeRawResult(era: 5, bytes: [0x01, 0x02, 0x03])
+        // Payload must be a single CBOR value. 0x80 = empty array.
+        // Era is not preserved in the QueryIfCurrent envelope (set to 0).
+        let res     = makeRawResult(era: 5, bytes: [0x80])
         let decoded = try roundTrip(.result(res))
         guard case .result(let r) = decoded else {
             Issue.record("Expected .result, got \(decoded)"); return
         }
-        #expect(r.era == 5)
-        #expect(r.rawCBOR.readableBytes == 3)
-        #expect(r.rawCBOR.getBytes(at: r.rawCBOR.readerIndex, length: 3) == [0x01, 0x02, 0x03])
+        #expect(r.rawCBOR.readableBytes == 1)
+        #expect(r.rawCBOR.getBytes(at: r.rawCBOR.readerIndex, length: 1) == [0x80])
     }
 
     @Test func releaseRoundTrip() throws {
@@ -383,35 +386,33 @@ private let testHash: BlockHash = Array(repeating: 0xAB, count: 32)
     }
 
     @Test func queryEncodesEraAndPayload() throws {
+        // Query uses BlockQuery → ShelleyQuery → [era, inline_payload] nesting.
+        // [3, [0, [0, [6, 0xAB, 0xCD]]]]
         let q     = makeRawQuery(era: 6, bytes: [0xAB, 0xCD])
         let buf   = try codec.encode(.query(q), allocator: alloc)
         let bytes = buf.getBytes(at: buf.readerIndex, length: buf.readableBytes)!
-        // [3, [6, bstr(2)]]
-        // 0x82  array(2)
-        // 0x03  uint(3) = msgQuery
-        // 0x82  array(2) era-tagged
-        // 0x06  uint(6) = Conway
-        // 0x42 0xAB 0xCD  bstr(2)
-        #expect(bytes[0] == 0x82)
+        #expect(bytes[0] == 0x82)  // array(2)
         #expect(bytes[1] == 0x03)  // msgQuery
-        #expect(bytes[2] == 0x82)  // era-tagged array
-        #expect(bytes[3] == 0x06)  // Conway era
-        #expect(bytes[4] == 0x42)  // bstr(2)
-        #expect(bytes[5] == 0xAB)
-        #expect(bytes[6] == 0xCD)
+        #expect(bytes[2] == 0x82)  // BlockQuery array(2)
+        #expect(bytes[3] == 0x00)  // BlockQuery type 0
+        #expect(bytes[4] == 0x82)  // ShelleyQuery array(2)
+        #expect(bytes[5] == 0x00)  // ShelleyQuery type 0
+        #expect(bytes[6] == 0x82)  // era pair array(2)
+        #expect(bytes[7] == 0x06)  // Conway era
+        #expect(bytes[8] == 0xAB)  // inline payload byte 0
+        #expect(bytes[9] == 0xCD)  // inline payload byte 1
     }
 
     @Test func resultEncodesEraAndPayload() throws {
+        // Result uses QueryIfCurrent success envelope: [[payload_inline]]
+        // [4, [[0xFF]]] = 0x82 0x04 0x81 0xFF
         let r     = makeRawResult(era: 4, bytes: [0xFF])
         let buf   = try codec.encode(.result(r), allocator: alloc)
         let bytes = buf.getBytes(at: buf.readerIndex, length: buf.readableBytes)!
-        // [4, [4, bstr(1)]]
-        #expect(bytes[0] == 0x82)
+        #expect(bytes[0] == 0x82)  // array(2)
         #expect(bytes[1] == 0x04)  // msgResult
-        #expect(bytes[2] == 0x82)  // era-tagged array
-        #expect(bytes[3] == 0x04)  // Alonzo era
-        #expect(bytes[4] == 0x41)  // bstr(1)
-        #expect(bytes[5] == 0xFF)
+        #expect(bytes[2] == 0x81)  // QueryIfCurrent envelope array(1)
+        #expect(bytes[3] == 0xFF)  // inline payload
     }
 
     // MARK: Era round-trips
@@ -426,12 +427,14 @@ private let testHash: BlockHash = Array(repeating: 0xAB, count: 32)
     }
 
     @Test func shelleyEraResultRoundTrip() throws {
-        let r       = makeRawResult(era: 1, bytes: [0x01])
+        // Era is not preserved through the QueryIfCurrent envelope (era set to 0).
+        // 0x80 = CBOR empty array, a single well-formed value.
+        let r       = makeRawResult(era: 1, bytes: [0x80])
         let decoded = try roundTrip(.result(r))
         guard case .result(let res) = decoded else {
             Issue.record("Expected .result"); return
         }
-        #expect(res.era == 1)
+        #expect(res.rawCBOR.readableBytes == 1)
     }
 
     // MARK: Block point hash preservation

@@ -285,6 +285,20 @@ enum CBORLite {
             return
         }
 
+        // CBOR tags (major type 6) encode the tag number in the additional info field.
+        // Tag numbers 0–23 use the info byte directly (no extra bytes), 24–27 follow
+        // the same extra-byte pattern as integers, and 28–30 are also direct values
+        // (no extra bytes) — readAdditionalInfo would throw for 28–30, so we handle
+        // tags before calling it.
+        if major == majorTag {
+            if info >= 24 && info <= 27 {
+                _ = try readAdditionalInfo(info, from: &buf)  // consume extra tag-number bytes
+            }
+            // info 0–23 and 28–30: tag number IS the info value, no extra bytes to read
+            try skipValue(in: &buf)  // skip the tagged value
+            return
+        }
+
         let count = Int(try readAdditionalInfo(info, from: &buf))
 
         switch major {
@@ -304,17 +318,12 @@ enum CBORLite {
                 try skipValue(in: &buf)  // value
             }
 
-        case majorTag:
-            try skipValue(in: &buf)  // tagged value
-
         case majorSimple:
-            // float 16: 2 extra bytes, float 32: 4 extra, float 64: 8 extra
-            switch info {
-            case 25: buf.moveReaderIndex(forwardBy: 2)
-            case 26: buf.moveReaderIndex(forwardBy: 4)
-            case 27: buf.moveReaderIndex(forwardBy: 8)
-            default: break
-            }
+            // Floats: extra bytes are the float payload (readAdditionalInfo above already
+            // consumed the length header for info 24–27; for floats 25/26/27 those ARE
+            // the float bytes, so we don't need to skip anything more).
+            // info 0–24: simple values, no extra data beyond what readAdditionalInfo read.
+            break
 
         default:
             throw CBORError.unsupportedMajorType(major)
