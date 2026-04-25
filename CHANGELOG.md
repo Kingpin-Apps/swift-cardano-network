@@ -1,3 +1,9 @@
+## 0.1.3 (2026-04-25)
+
+### Fix
+
+- Refactor LocalStateQueryClient and related codecs for improved CBOR handling
+
 ## 0.1.2 (2026-04-23)
 
 ### Fix
