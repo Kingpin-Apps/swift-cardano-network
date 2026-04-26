@@ -4,15 +4,14 @@ public struct ProtocolConfig: Codable, Sendable {
     /// NtC versions to propose in Handshake, highest-preferred first.
     /// Wire values include bit 15 (0x8000) per spec §3.1.
     ///
-    /// **Note**: the default tops out at v16 because the LocalStateQuery codec in
-    /// this library hard-codes the v16 Conway query indices.  At NtC v17+ the
-    /// cardano-node renumbers those queries (e.g. `GetGovState`, `GetRatifyState`,
-    /// `GetBigLedgerPeerSnapshot`) and the existing codec sends/decodes them with
-    /// the wrong tags, which causes the node to drop the connection.  Override
-    /// this to include v19+ if you only use mini-protocols whose encodings
-    /// haven't changed (e.g. LocalTxMonitor, ChainSync, LocalTxSubmission); in
-    /// that case `LocalTxMonitorClient.measures()` will start working too.
-    public var ntcVersions: [UInt16] = [32784, 32783, 32782, 32777]   // v16, v15, v14, v9
+    /// Defaults to every NtC version this library knows how to encode against,
+    /// from v23 down to the legacy v9.  The handshake decoder picks the
+    /// highest mutually supported version; query factories in
+    /// `LedgerQuery+Typed.swift` switch wire form per the negotiated version
+    /// (see `NtcQueryGate`), so the same default works on cardano-node 10.6.x
+    /// (v22), 10.7.0+ (v23), and any older binary that still advertises
+    /// v9..v21.
+    public var ntcVersions: [UInt16] = NodeToClientVersion.allKnown
     /// Max SDU payload size for NtN connections in bytes
     public var ntnMaxSDUSize: Int = 12_288
     /// Max SDU payload size for NtC connections in bytes

@@ -85,9 +85,9 @@ import Foundation
     @Test func defaults() {
         let c = ProtocolConfig()
         #expect(c.ntnVersions.first == 14)  // highest supported NtN version (Conway)
-        #expect(c.ntcVersions.first == 32784)  // v16 wire value (32768 + 16)
+        #expect(c.ntcVersions.first == NodeToClientVersion.v23)  // 32791 = highest known NtC
         #expect(c.ntnVersions.last == 7)
-        #expect(c.ntcVersions.last == 32777)   // v9 wire value (32768 + 9)
+        #expect(c.ntcVersions.last == NodeToClientVersion.v9)   // 32777 = oldest known NtC
         #expect(c.ntnMaxSDUSize == 12_288)
         #expect(c.ntcMaxSDUSize == 12_288)
         #expect(c.keepAliveIntervalSeconds == 60.0)
