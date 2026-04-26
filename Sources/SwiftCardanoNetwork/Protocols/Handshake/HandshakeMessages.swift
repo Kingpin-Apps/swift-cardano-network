@@ -32,6 +32,15 @@ public enum NodeToClientVersion {
     public static let v19: UInt16 = 32787
     public static let v20: UInt16 = 32788
     public static let v21: UInt16 = 32789
+    public static let v22: UInt16 = 32790   // cardano-node 10.6.0
+    public static let v23: UInt16 = 32791   // cardano-node 10.7.0
+
+    /// Every NtC wire version this library knows how to negotiate, highest first.
+    ///
+    /// Order matches the `ntcVersions` preference order used by `Handshake`.
+    public static let allKnown: [UInt16] = [
+        v23, v22, v21, v20, v19, v18, v17, v16, v15, v14, v9
+    ]
 }
 
 // MARK: - Version data
