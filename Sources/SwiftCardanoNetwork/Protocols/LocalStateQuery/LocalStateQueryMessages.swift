@@ -74,4 +74,7 @@ public enum LocalStateQueryError: Error, Sendable {
     case unknownAcquireFailure(UInt64)
     /// The encoded point had an unexpected array length.
     case malformedPoint(arrayLength: Int)
+    /// The caller asked for a query that the negotiated NtC version does not
+    /// support.  See `NtcQueryGate` for the per-query version table.
+    case queryNotSupported(name: String, negotiatedVersion: UInt16, requiredVersion: UInt16)
 }
