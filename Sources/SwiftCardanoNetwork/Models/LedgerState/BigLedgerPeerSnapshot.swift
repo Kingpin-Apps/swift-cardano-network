@@ -66,21 +66,38 @@ extension LedgerPeer: Hashable {}
 /// active stake. New nodes use this snapshot for initial peer discovery before they
 /// have synced enough chain state to perform full peer selection.
 ///
-/// Wire format: list[2]:
-///   [0] uint(1)       — snapshot encoding version
-///   [1] list[2]:
-///       [0] WithOrigin(SlotNo) — slot when the snapshot was taken:
-///               Origin:  list[1]: [uint(0)]
-///               At(s):   list[2]: [uint(1), uint(s)]
-///       [1] indefiniteList of LedgerPeer entries
+/// Wire format (snapshot version 1 — pre-NtCv23 nodes):
+///   list[2]:
+///     [0] uint(1)       — snapshot encoding version
+///     [1] list[2]:
+///         [0] WithOrigin(SlotNo):
+///                 Origin:  list[1]: [uint(0)]
+///                 At(s):   list[2]: [uint(1), uint(s)]
+///         [1] indefiniteList of v1-shaped peers
+///                 list[2]: [accStake list[2], list[2]: [poolStake list[2], relays]]
+///
+/// Wire format (snapshot version 2 — cardano-node 10.7.0+, NtCv23 SRV form):
+///   list[2]:
+///     [0] uint(2)       — snapshot encoding version
+///     [1] list[3]:
+///         [0] Tip — list[3]: [uint(1), slot:uint, hash:bytes(32)]
+///                   (or list[1]: [uint(0)] for genesis/origin — not yet observed
+///                   in the wild; treated symmetrically with the WithOrigin path)
+///         [1] uint — peer count (advisory; we count peers by length anyway)
+///         [2] indefiniteList of v2-shaped peers
+///                 list[3]: [accStake list[2], poolStake list[2], relays]
 public struct BigLedgerPeerSnapshot: CBORSerializable, Sendable {
     /// Slot when the snapshot was taken (nil = genesis/origin).
     public let snapshotSlot: UInt64?
+    /// Block-hash anchor when the snapshot was taken.  Always nil for v1
+    /// snapshots; populated for v2 (NtCv23+) snapshots.
+    public let snapshotHash: Data?
     /// Ledger peers, sorted by ascending accumulated relative stake.
     public let peers: [LedgerPeer]
 
-    public init(snapshotSlot: UInt64?, peers: [LedgerPeer]) {
+    public init(snapshotSlot: UInt64?, snapshotHash: Data? = nil, peers: [LedgerPeer]) {
         self.snapshotSlot = snapshotSlot
+        self.snapshotHash = snapshotHash
         self.peers = peers
     }
 
@@ -89,18 +106,83 @@ public struct BigLedgerPeerSnapshot: CBORSerializable, Sendable {
             throw LedgerStateDecodingError.unexpectedFormat(
                 "BigLedgerPeerSnapshot: expected list[2+], got \(primitive)")
         }
-        guard case .list(let v1) = top[1], v1.count >= 2 else {
+        let snapshotVersion: UInt
+        switch top[0] {
+        case .uint(let u): snapshotVersion = u
+        case .int(let i) where i >= 0: snapshotVersion = UInt(i)
+        default:
             throw LedgerStateDecodingError.unexpectedFormat(
-                "BigLedgerPeerSnapshot: expected v1 content list[2+], got \(top[1])")
+                "BigLedgerPeerSnapshot: expected uint snapshot version, got \(top[0])")
         }
-        snapshotSlot = try Self.decodeWithOriginSlot(v1[0])
-        peers = try Self.decodePeers(v1[1])
+        guard case .list(let inner) = top[1] else {
+            throw LedgerStateDecodingError.unexpectedFormat(
+                "BigLedgerPeerSnapshot: expected list inner content, got \(top[1])")
+        }
+        switch snapshotVersion {
+        case 1:
+            guard inner.count >= 2 else {
+                throw LedgerStateDecodingError.unexpectedFormat(
+                    "BigLedgerPeerSnapshot v1: expected inner list[2+], got count \(inner.count)")
+            }
+            snapshotSlot = try Self.decodeWithOriginSlot(inner[0])
+            snapshotHash = nil
+            peers = try Self.decodePeers(inner[1], shape: .v1)
+        case 2:
+            guard inner.count >= 3 else {
+                throw LedgerStateDecodingError.unexpectedFormat(
+                    "BigLedgerPeerSnapshot v2: expected inner list[3+], got count \(inner.count)")
+            }
+            let (slot, hash) = try Self.decodeTip(inner[0])
+            snapshotSlot = slot
+            snapshotHash = hash
+            // inner[1] is an advisory peer count we ignore.
+            peers = try Self.decodePeers(inner[2], shape: .v2)
+        default:
+            throw LedgerStateDecodingError.unexpectedFormat(
+                "BigLedgerPeerSnapshot: unknown snapshot version \(snapshotVersion)")
+        }
     }
 
     public func toPrimitive() throws -> Primitive {
+        // Always emit v1 — this library doesn't currently produce snapshots for
+        // node-side use.  Decoding is what matters.
         let slotPrim = Self.encodeWithOriginSlot(snapshotSlot)
         let peersPrim = Primitive.indefiniteList(IndefiniteList(try peers.map { try Self.encodePeer($0) }))
         return .list([.uint(1), .list([slotPrim, peersPrim])])
+    }
+
+    // MARK: - Tip (v2 anchor)
+
+    private static func decodeTip(_ p: Primitive) throws -> (slot: UInt64?, hash: Data?) {
+        guard case .list(let items) = p, !items.isEmpty else {
+            throw LedgerStateDecodingError.unexpectedFormat(
+                "BigLedgerPeerSnapshot v2: expected Tip list, got \(p)")
+        }
+        switch items[0] {
+        case .uint(0), .int(0):
+            return (nil, nil)  // Origin
+        case .uint(1), .int(1):
+            guard items.count >= 3 else {
+                throw LedgerStateDecodingError.unexpectedFormat(
+                    "BigLedgerPeerSnapshot v2: Tip At missing slot or hash (count=\(items.count))")
+            }
+            let slot: UInt64
+            switch items[1] {
+            case .uint(let u): slot = UInt64(u)
+            case .int(let i) where i >= 0: slot = UInt64(i)
+            default:
+                throw LedgerStateDecodingError.unexpectedFormat(
+                    "BigLedgerPeerSnapshot v2: expected uint slot, got \(items[1])")
+            }
+            guard case .bytes(let h) = items[2] else {
+                throw LedgerStateDecodingError.unexpectedFormat(
+                    "BigLedgerPeerSnapshot v2: expected bytes hash, got \(items[2])")
+            }
+            return (slot, h)
+        default:
+            throw LedgerStateDecodingError.unexpectedFormat(
+                "BigLedgerPeerSnapshot v2: unexpected Tip tag \(items[0])")
+        }
     }
 
     // MARK: - WithOrigin(SlotNo)
@@ -138,7 +220,9 @@ public struct BigLedgerPeerSnapshot: CBORSerializable, Sendable {
 
     // MARK: - Peers
 
-    private static func decodePeers(_ p: Primitive) throws -> [LedgerPeer] {
+    private enum PeerShape { case v1, v2 }
+
+    private static func decodePeers(_ p: Primitive, shape: PeerShape) throws -> [LedgerPeer] {
         let items: [Primitive]
         switch p {
         case .list(let l): items = l
@@ -147,23 +231,40 @@ public struct BigLedgerPeerSnapshot: CBORSerializable, Sendable {
             throw LedgerStateDecodingError.unexpectedFormat(
                 "BigLedgerPeerSnapshot: expected list for peers, got \(p)")
         }
-        return try items.map { try decodePeer($0) }
+        return try items.map { try decodePeer($0, shape: shape) }
     }
 
-    private static func decodePeer(_ p: Primitive) throws -> LedgerPeer {
-        // list[2]: [accumulatedRelativeStake, list[2]: [relativeStake, relays]]
-        guard case .list(let f) = p, f.count >= 2 else {
+    private static func decodePeer(_ p: Primitive, shape: PeerShape) throws -> LedgerPeer {
+        guard case .list(let f) = p else {
             throw LedgerStateDecodingError.unexpectedFormat(
-                "BigLedgerPeerSnapshot: expected list[2+] for peer, got \(p)")
+                "BigLedgerPeerSnapshot: expected list for peer, got \(p)")
         }
-        let accStake = try decodeRational(f[0], label: "accumulatedRelativeStake")
-        guard case .list(let inner) = f[1], inner.count >= 2 else {
-            throw LedgerStateDecodingError.unexpectedFormat(
-                "BigLedgerPeerSnapshot: expected inner list[2+] for (poolStake, relays), got \(f[1])")
+        switch shape {
+        case .v1:
+            // list[2]: [accumulatedRelativeStake, list[2]: [relativeStake, relays]]
+            guard f.count >= 2 else {
+                throw LedgerStateDecodingError.unexpectedFormat(
+                    "BigLedgerPeerSnapshot v1: expected list[2+] for peer, got count \(f.count)")
+            }
+            let accStake = try decodeRational(f[0], label: "accumulatedRelativeStake")
+            guard case .list(let inner) = f[1], inner.count >= 2 else {
+                throw LedgerStateDecodingError.unexpectedFormat(
+                    "BigLedgerPeerSnapshot v1: expected inner list[2+], got \(f[1])")
+            }
+            let poolStake = try decodeRational(inner[0], label: "relativeStake")
+            let relays = try decodeRelays(inner[1])
+            return LedgerPeer(accumulatedRelativeStake: accStake, relativeStake: poolStake, relays: relays)
+        case .v2:
+            // list[3]: [accumulatedRelativeStake, relativeStake, relays] — flattened
+            guard f.count >= 3 else {
+                throw LedgerStateDecodingError.unexpectedFormat(
+                    "BigLedgerPeerSnapshot v2: expected list[3+] for peer, got count \(f.count)")
+            }
+            let accStake = try decodeRational(f[0], label: "accumulatedRelativeStake")
+            let poolStake = try decodeRational(f[1], label: "relativeStake")
+            let relays = try decodeRelays(f[2])
+            return LedgerPeer(accumulatedRelativeStake: accStake, relativeStake: poolStake, relays: relays)
         }
-        let poolStake = try decodeRational(inner[0], label: "relativeStake")
-        let relays = try decodeRelays(inner[1])
-        return LedgerPeer(accumulatedRelativeStake: accStake, relativeStake: poolStake, relays: relays)
     }
 
     private static func decodeRational(_ p: Primitive, label: String) throws -> UnitInterval {
