@@ -294,6 +294,54 @@ struct RatifyStateLiveTests {
     }
 }
 
+// MARK: - PoolDistr live decode test
+
+@Suite(
+    "PoolDistr live decode",
+    .enabled(if: previewSocketReachable(path: previewSocket), "No live preview socket"),
+    .serialized
+)
+struct PoolDistrLiveTests {
+
+    @Test("queryPoolDistr: decodes fully from live preview node")
+    func queryPoolDistrDecodes() async throws {
+        var connConfig = ConnectionConfig()
+        connConfig.socketPath = previewSocket
+        connConfig.networkMagic = 2
+
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+        defer { shutdownEventLoopGroup(group) }
+
+        var cfg = CardanoNetworkConfiguration()
+        cfg.connection = connConfig
+        cfg.protocol.ntcVersions = NodeToClientVersion.allKnown
+
+        let conn = try await CardanoNode.connectToClient(config: cfg, group: group)
+        defer { Task { await conn.close() } }
+
+        let dist = try await conn.queryPoolDistr()
+
+        // We expect at least one pool on a healthy preview node.
+        #expect(dist.entries.isEmpty == false)
+        for entry in dist.entries.prefix(5) {
+            #expect(entry.poolKeyHash.count == 28)
+            #expect(entry.vrfKeyHash.count == 32)
+            #expect(entry.stakeDenominator > 0)
+            // v2 (NtCv21+) responses populate absoluteStake; if the node
+            // negotiates v21+ we should see real values.
+            if conn.negotiatedVersion >= NodeToClientVersion.v21 {
+                #expect(entry.absoluteStake != nil)
+            }
+        }
+        if conn.negotiatedVersion >= NodeToClientVersion.v21 {
+            #expect(dist.totalStake != nil)
+            #expect((dist.totalStake ?? 0) > 0)
+        }
+
+        await conn.close()
+    }
+}
+
 // MARK: - BigLedgerPeerSnapshot live decode test
 
 @Suite(
