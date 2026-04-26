@@ -13,7 +13,8 @@ import NIOCore
 /// msgNextTx           = [5]
 /// msgReplyNextTx      = [6]          ; no tx (snapshot exhausted)
 ///                     / [6, bstr]    ; raw tx CBOR bytes
-/// msgHasTx            = [7, bstr]   ; 32-byte txId
+/// msgHasTx            = [7, [eraIndex, bstr]]   ; OneEraGenTxId
+///                     / [7, bstr]                ; legacy bare-hash form (decoder only)
 /// msgReplyHasTx       = [8, bool]
 /// msgGetSizes         = [9]
 /// msgReplyGetSizes    = [10, [uint, uint, uint]]   ; nested array
@@ -53,17 +54,22 @@ public struct LocalTxMonitorCodec: ProtocolCodec, Sendable {
             CBORLite.writeUInt(5, into: &buf)
 
         case .replyNextTx(let tx):
-            CBORLite.writeArrayHeader(count: 2, into: &buf)
-            CBORLite.writeUInt(6, into: &buf)
             if let tx = tx {
+                CBORLite.writeArrayHeader(count: 2, into: &buf)
+                CBORLite.writeUInt(6, into: &buf)
                 CBORLite.writeByteBuffer(tx.rawCBOR, into: &buf)
             } else {
-                CBORLite.writeNull(into: &buf)
+                CBORLite.writeArrayHeader(count: 1, into: &buf)
+                CBORLite.writeUInt(6, into: &buf)
             }
 
-        case .hasTx(let txId):
+        case .hasTx(let eraIndex, let txId):
+            // [7, [eraIndex, txId]] — OneEraGenTxId encoding required by
+            // HardFork-aware Cardano nodes (NtC v9+).
             CBORLite.writeArrayHeader(count: 2, into: &buf)
             CBORLite.writeUInt(7, into: &buf)
+            CBORLite.writeArrayHeader(count: 2, into: &buf)
+            CBORLite.writeUInt(eraIndex, into: &buf)
             CBORLite.writeByteString(txId, into: &buf)
 
         case .replyHasTx(let present):
@@ -136,6 +142,12 @@ public struct LocalTxMonitorCodec: ProtocolCodec, Sendable {
             return .nextTx
 
         case 6:
+            // Spec: [6] (snapshot exhausted) or [6, bstr] (raw tx).
+            // Accept legacy [6, null] as equivalent to [6] for back-compat with
+            // earlier versions of this codec.
+            if arrayLen == 1 {
+                return .replyNextTx(nil)
+            }
             guard arrayLen == 2 else { throw LocalTxMonitorError.unexpectedArrayLength(arrayLen) }
             if CBORLite.peekIsNull(buf) {
                 try CBORLite.readNull(from: &buf)
@@ -147,8 +159,19 @@ public struct LocalTxMonitorCodec: ProtocolCodec, Sendable {
 
         case 7:
             guard arrayLen == 2 else { throw LocalTxMonitorError.unexpectedArrayLength(arrayLen) }
-            let txId = try CBORLite.readByteString(from: &buf)
-            return .hasTx(txId)
+            // Spec: [7, [eraIndex, bstr]].  Also accept the legacy bare-hash form
+            // [7, bstr] produced by older versions of this codec, treating it as
+            // era 0 (Byron) — only relevant when round-tripping through tests/mocks.
+            if CBORLite.peekMajorType(from: buf) == CBORLite.majorArray {
+                let inner = try CBORLite.readArrayHeader(from: &buf)
+                guard inner == 2 else { throw LocalTxMonitorError.unexpectedArrayLength(inner) }
+                let eraIndex = try CBORLite.readUInt(from: &buf)
+                let txId = try CBORLite.readByteString(from: &buf)
+                return .hasTx(eraIndex: eraIndex, txId: txId)
+            } else {
+                let txId = try CBORLite.readByteString(from: &buf)
+                return .hasTx(eraIndex: 0, txId: txId)
+            }
 
         case 8:
             guard arrayLen == 2 else { throw LocalTxMonitorError.unexpectedArrayLength(arrayLen) }

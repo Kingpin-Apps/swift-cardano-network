@@ -221,7 +221,7 @@ extension NodeToClientConnection {
     // MARK: - Typed mempool snapshot
 
     /// Snapshot the local mempool and return decoded `Transaction` values.
-    public func snapshotMempool() async throws -> (slotNo: UInt64, txs: [Transaction]) {
+    public func snapshotMempool() async throws -> MempoolSnapshot {
         try await txMonitor.snapshotTyped()
     }
 
@@ -230,8 +230,8 @@ extension NodeToClientConnection {
     /// Check whether a specific transaction is in the current mempool snapshot.
     ///
     /// Equivalent to `txMonitor.hasTx(_:)` but callable directly on the connection.
-    public func hasTx(_ txId: TxId) async throws -> Bool {
-        try await txMonitor.hasTx(txId)
+    public func hasTx(_ txId: TransactionId) async throws -> Bool {
+        try await txMonitor.hasTx(txId.payload.byteArray)
     }
 
     /// Read mempool size metrics (capacity, current usage, transaction count).
@@ -243,10 +243,8 @@ extension NodeToClientConnection {
 
     /// Read extended mempool measures (totals plus named capacity/current pairs).
     ///
-    /// Equivalent to `txMonitor.measures()` but callable directly on the connection.
-    public func mempoolMeasures() async throws
-        -> (totalTxs: UInt32, measures: [(key: String, current: Int64, capacity: Int64)])
-    {
-        try await txMonitor.measures()
+    /// Equivalent to `txMonitor.measuresTyped()` but callable directly on the connection.
+    public func mempoolMeasures() async throws -> MempoolMeasures {
+        try await txMonitor.measuresTyped()
     }
 }

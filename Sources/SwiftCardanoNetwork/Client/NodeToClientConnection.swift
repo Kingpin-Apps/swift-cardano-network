@@ -39,6 +39,12 @@ public struct NodeToClientConnection: Sendable {
     /// on demand via `reqResp(codec:)`.
     let demux: DemuxHandler
 
+    /// The NtC protocol version that was negotiated during Handshake (raw wire
+    /// value; subtract `0x8000` for the conventional version number).  Mini-
+    /// protocol clients gate version-dependent messages on this — for example
+    /// `LocalTxMonitorClient.measures()` requires v19+ (raw `32787`).
+    public let negotiatedVersion: UInt16
+
     // MARK: - Mini-protocol clients
 
     /// ChainSync — streams full blocks (NtC delivers complete blocks, not headers).
@@ -55,13 +61,15 @@ public struct NodeToClientConnection: Sendable {
 
     // MARK: - Init (package-internal; use CardanoNode.connectToClient)
 
-    init(channel: Channel, demux: DemuxHandler) {
+    init(channel: Channel, demux: DemuxHandler, negotiatedVersion: UInt16 = 0) {
         self.channel = channel
         self.demux = demux
+        self.negotiatedVersion = negotiatedVersion
         self.chainSync = ChainSyncClient(channel: channel, demux: demux, protocolID: MuxSDU.ProtocolID.ntcChainSync)
         self.txSubmission = LocalTxSubmissionClient(channel: channel, demux: demux)
         self.stateQuery = LocalStateQueryClient(channel: channel, demux: demux)
-        self.txMonitor = LocalTxMonitorClient(channel: channel, demux: demux)
+        self.txMonitor = LocalTxMonitorClient(
+            channel: channel, demux: demux, negotiatedVersion: negotiatedVersion)
     }
 
     // MARK: - Lifecycle

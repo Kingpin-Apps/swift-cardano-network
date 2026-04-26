@@ -564,7 +564,7 @@ private struct MockServerRunner: Sendable {
                         protocolID: MuxSDU.ProtocolID.localTxMonitor)
                 }
 
-            case .hasTx(let txId):
+            case .hasTx(_, let txId):
                 let found = config.mempoolTxs.contains { tx in
                     let stored =
                         tx.rawCBOR.getBytes(

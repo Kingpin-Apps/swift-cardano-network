@@ -83,12 +83,12 @@ struct LocalTxMonitorClientSnapshotTypedTests {
 
         let (channel, demux) = try await connectAndHandshakeNtN(port: node.port, group: group)
 
-        let (slotNo, txs) = try await LocalTxMonitorClient(
+        let snapshot = try await LocalTxMonitorClient(
             channel: channel, demux: demux
         ).snapshotTyped()
 
-        #expect(slotNo == 42_000)
-        #expect(txs.isEmpty)
+        #expect(snapshot.slotNo == 42_000)
+        #expect(snapshot.txs.isEmpty)
 
         try? await channel.close()
         try? await node.stop()
@@ -128,10 +128,10 @@ struct LocalTxMonitorClientSnapshotTypedTests {
 
         let (channel, demux) = try await connectAndHandshakeNtN(port: node.port, group: group)
 
-        let (slotNo, _) = try await LocalTxMonitorClient(
+        let snapshot = try await LocalTxMonitorClient(
             channel: channel, demux: demux
         ).snapshotTyped()
-        #expect(slotNo == 999_999)
+        #expect(snapshot.slotNo == 999_999)
 
         try? await channel.close()
         try? await node.stop()

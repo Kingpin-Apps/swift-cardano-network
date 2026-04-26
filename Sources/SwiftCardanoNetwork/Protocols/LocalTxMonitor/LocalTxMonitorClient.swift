@@ -29,14 +29,20 @@ public struct LocalTxMonitorClient: Sendable {
     private let channel: Channel
     private let demux: DemuxHandler
     private let logger: Logger
+    /// Raw NtC handshake version (e.g. `32787` for v19).  `0` means unknown,
+    /// in which case version-gated calls don't pre-flight check.  See
+    /// `LocalTxMonitorError.measuresNotSupported` for the gating logic.
+    private let negotiatedVersion: UInt16
 
     public init(
         channel: Channel,
         demux: DemuxHandler,
+        negotiatedVersion: UInt16 = 0,
         logger: Logger = LoggerFactory.logger(subsystem: "localtxmonitor")
     ) {
         self.channel = channel
         self.demux = demux
+        self.negotiatedVersion = negotiatedVersion
         self.logger = logger
     }
 
@@ -94,37 +100,57 @@ public struct LocalTxMonitorClient: Sendable {
 
     /// Acquire a mempool snapshot and check whether `txId` is present.
     ///
+    /// The cardano-node mempool stores transactions under era-wrapped IDs
+    /// (`OneEraGenTxId`) and does not normalise lookups across eras, so a query
+    /// for a Conway hash will return `false` if the tx is currently sitting in
+    /// the Babbage codec path.  This method probes each post-Byron era
+    /// (newest-first) within a single snapshot until the node confirms the tx
+    /// is present, mirroring the workaround documented in Ogmios 6.2.0 release
+    /// notes and IntersectMBO/ouroboros-consensus#1009.
+    ///
     /// - Parameter txId: The 32-byte transaction identifier to look up.
-    /// - Returns: `true` if the transaction is in the current mempool snapshot.
+    /// - Returns: `true` if any era reports the transaction in the current
+    ///   mempool snapshot.
     /// - Throws: A `ProtocolError` on agency or state-machine violations.
     public func hasTx(_ txId: TxId) async throws -> Bool {
         let driver = makeDriver()
 
         _ = try await acquire(driver: driver)
 
-        try await driver.send(.hasTx(txId)) { state in
-            guard let s = state as? LocalTxMonitorState else { return state }
-            return try s.afterSend(.hasTx(txId))
+        for eraIndex in CardanoEraIndex.hasTxRetryOrder {
+            let msg: LocalTxMonitorMessage = .hasTx(eraIndex: eraIndex, txId: txId)
+
+            try await driver.send(msg) { state in
+                guard let s = state as? LocalTxMonitorState else { return state }
+                return try s.afterSend(msg)
+            }
+
+            let reply = try await driver.receive { m, state in
+                guard let s = state as? LocalTxMonitorState else { return state }
+                return try s.afterReceive(m)
+            }
+
+            guard case .replyHasTx(let present) = reply else {
+                throw ProtocolError.invalidTransition(
+                    protocol: "localTxMonitor",
+                    state: "busy",
+                    message: String(describing: reply)
+                )
+            }
+
+            if present {
+                logger.debug("LocalTxMonitor: hasTx", metadata: [
+                    "present": "true",
+                    "eraIndex": "\(eraIndex)",
+                ])
+                try await release(driver: driver)
+                return true
+            }
         }
 
-        let reply = try await driver.receive { msg, state in
-            guard let s = state as? LocalTxMonitorState else { return state }
-            return try s.afterReceive(msg)
-        }
-
-        guard case .replyHasTx(let present) = reply else {
-            throw ProtocolError.invalidTransition(
-                protocol: "localTxMonitor",
-                state: "busy",
-                message: String(describing: reply)
-            )
-        }
-
-        logger.debug("LocalTxMonitor: hasTx", metadata: ["present": "\(present)"])
-
+        logger.debug("LocalTxMonitor: hasTx", metadata: ["present": "false"])
         try await release(driver: driver)
-
-        return present
+        return false
     }
 
     /// Acquire a mempool snapshot and return the current size metrics.
@@ -174,9 +200,22 @@ public struct LocalTxMonitorClient: Sendable {
 
     /// Acquire a mempool snapshot and return extended measure data.
     ///
+    /// `MsgGetMeasures` was added in NtC v19.  When the connection has
+    /// negotiated a lower version (the library default tops out at v16) this
+    /// call would otherwise be silently rejected by the node — so it instead
+    /// throws `LocalTxMonitorError.measuresNotSupported` up-front.  Override
+    /// `ProtocolConfig.ntcVersions` to include v19+ to enable the call.
+    ///
     /// - Returns: Total transaction count and a map of named measure pairs (current, capacity).
-    /// - Throws: A `ProtocolError` on agency or state-machine violations.
+    /// - Throws: `LocalTxMonitorError.measuresNotSupported` if NtC < v19;
+    ///   `ProtocolError` on agency or state-machine violations.
     public func measures() async throws -> (totalTxs: UInt32, measures: [(key: String, current: Int64, capacity: Int64)]) {
+        let required: UInt16 = 32787  // NtC v19
+        if negotiatedVersion != 0 && negotiatedVersion < required {
+            throw LocalTxMonitorError.measuresNotSupported(
+                negotiatedVersion: negotiatedVersion, requiredVersion: required)
+        }
+
         let driver = makeDriver()
 
         _ = try await acquire(driver: driver)

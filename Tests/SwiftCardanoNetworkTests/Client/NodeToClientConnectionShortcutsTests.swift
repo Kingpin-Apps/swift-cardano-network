@@ -63,7 +63,7 @@ struct NodeToClientConnectionMempoolShortcutsTests {
 
         let (channel, conn) = try await connectNtC(port: node.port, group: group)
 
-        let txId: TxId = Array(repeating: 0xAB, count: 32)
+        let txId = TransactionId(payload: Data(repeating: 0xAB, count: 32))
         let present = try await conn.hasTx(txId)
         #expect(present == false)
 

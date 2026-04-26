@@ -59,14 +59,15 @@ public enum CardanoNode {
             group: group
         ).connect()
 
-        _ = try await HandshakeClient(
+        let negotiated = try await HandshakeClient(
             channel: channel,
             demux: demux,
             config: proto,
             mode: .nodeToClient
         ).negotiate(networkMagic: conn.networkMagic)
 
-        return NodeToClientConnection(channel: channel, demux: demux)
+        return NodeToClientConnection(
+            channel: channel, demux: demux, negotiatedVersion: negotiated.version)
     }
 
     // MARK: - NtN factory

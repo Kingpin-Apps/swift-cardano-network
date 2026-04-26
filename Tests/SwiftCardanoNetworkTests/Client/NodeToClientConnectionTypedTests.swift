@@ -158,9 +158,9 @@ struct NodeToClientConnectionTypedTests {
 
         let (channel, conn) = try await connectNtC(port: node.port, group: group)
 
-        let (slotNo, txs) = try await conn.snapshotMempool()
-        #expect(slotNo == 77_777)
-        #expect(txs.isEmpty)
+        let snapshot = try await conn.snapshotMempool()
+        #expect(snapshot.slotNo == 77_777)
+        #expect(snapshot.txs.isEmpty)
 
         try? await channel.close()
         try? await node.stop()

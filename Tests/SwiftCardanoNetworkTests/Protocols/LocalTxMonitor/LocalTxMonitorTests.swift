@@ -117,7 +117,8 @@ private let sampleTxId: TxId = Array(repeating: 0xAB, count: 32)
     }
 
     @Test func acquiredHasTxToBusy() throws {
-        let next = try LocalTxMonitorState.acquired.afterSend(.hasTx(sampleTxId))
+        let next = try LocalTxMonitorState.acquired.afterSend(
+            .hasTx(eraIndex: CardanoEraIndex.conway, txId: sampleTxId))
         #expect(next == .busy)
     }
 
@@ -308,10 +309,27 @@ private let sampleTxId: TxId = Array(repeating: 0xAB, count: 32)
     }
 
     @Test func hasTxRoundTrip() throws {
-        let decoded = try roundTrip(.hasTx(sampleTxId))
-        guard case .hasTx(let id) = decoded else {
+        let decoded = try roundTrip(
+            .hasTx(eraIndex: CardanoEraIndex.conway, txId: sampleTxId))
+        guard case .hasTx(let era, let id) = decoded else {
             Issue.record("Expected .hasTx, got \(decoded)"); return
         }
+        #expect(era == CardanoEraIndex.conway)
+        #expect(id == sampleTxId)
+    }
+
+    @Test func hasTxLegacyBareHashDecodes() throws {
+        // Older versions of this codec emitted [7, bstr] without the era
+        // wrapper.  The decoder still accepts that form so existing test
+        // fixtures and mocks continue to round-trip.
+        var buf = alloc.buffer(capacity: 36)
+        buf.writeBytes([0x82, 0x07, 0x58, 0x20])
+        buf.writeBytes(sampleTxId)
+        let decoded = try codec.decode(&buf)
+        guard case .hasTx(let era, let id) = decoded else {
+            Issue.record("Expected .hasTx, got \(decoded)"); return
+        }
+        #expect(era == CardanoEraIndex.byron)  // legacy form is treated as era 0
         #expect(id == sampleTxId)
     }
 
@@ -464,13 +482,13 @@ private let sampleTxId: TxId = Array(repeating: 0xAB, count: 32)
         #expect(buf.getBytes(at: buf.readerIndex, length: 2) == [0x81, 0x00])
     }
 
-    @Test func replyNextTxNilEncodesNull() throws {
+    @Test func replyNextTxNilEncodesEmpty() throws {
         let buf   = try codec.encode(.replyNextTx(nil), allocator: alloc)
         let bytes = buf.getBytes(at: buf.readerIndex, length: buf.readableBytes)!
-        // [6, null] = 0x82, 0x06, 0xF6
-        #expect(bytes[0] == 0x82)
+        // [6] = 0x81, 0x06 (snapshot exhausted, per Cardano spec §3.14.5)
+        #expect(bytes.count == 2)
+        #expect(bytes[0] == 0x81)
         #expect(bytes[1] == 0x06)
-        #expect(bytes[2] == 0xF6)
     }
 
     @Test func acquiredEncodesSlotNo() throws {
@@ -513,16 +531,19 @@ private let sampleTxId: TxId = Array(repeating: 0xAB, count: 32)
         #expect(bytes[5] == 0x00)
     }
 
-    @Test func hasTxEncodesTxId() throws {
+    @Test func hasTxEncodesEraWrappedTxId() throws {
         let txId: TxId = Array(repeating: 0xFF, count: 32)
-        let buf   = try codec.encode(.hasTx(txId), allocator: alloc)
+        let buf   = try codec.encode(
+            .hasTx(eraIndex: CardanoEraIndex.conway, txId: txId), allocator: alloc)
         let bytes = buf.getBytes(at: buf.readerIndex, length: buf.readableBytes)!
-        // [7, bstr(32)] = 0x82, 0x07, 0x58, 0x20, <32 bytes>
+        // [7, [6, bstr(32)]] = 0x82, 0x07, 0x82, 0x06, 0x58, 0x20, <32 bytes>
         #expect(bytes[0] == 0x82)
         #expect(bytes[1] == 0x07)
-        #expect(bytes[2] == 0x58)
-        #expect(bytes[3] == 0x20)
-        #expect(bytes[4...35] == ArraySlice(Array(repeating: 0xFF, count: 32)))
+        #expect(bytes[2] == 0x82)
+        #expect(bytes[3] == 0x06)  // Conway era index
+        #expect(bytes[4] == 0x58)
+        #expect(bytes[5] == 0x20)
+        #expect(bytes[6...37] == ArraySlice(Array(repeating: 0xFF, count: 32)))
     }
 
     // MARK: Large slot number
