@@ -177,20 +177,23 @@ private func makeRejection(era: Era = .conway, bytes: [UInt8] = [0xBA, 0xD0]) ->
         let tx  = makeRawTx(era: .conway, bytes: [0xAB, 0xCD])
         let buf = try codec.encode(.submitTx(tx), allocator: alloc)
 
-        // Outer: [0, [era, bstr(2)]]
-        // 0x82           array(2)
-        // 0x00           uint(0)         msgSubmitTx
-        // 0x82           array(2)        era-tagged
-        // 0x06           uint(6)         Conway era
-        // 0x42 0xAB 0xCD bstr(2)         tx bytes
+        // Outer: [0, [era, #6.24(bstr(2))]]
+        // 0x82              array(2)
+        // 0x00              uint(0)         msgSubmitTx
+        // 0x82              array(2)        era-tagged
+        // 0x06              uint(6)         Conway era
+        // 0xD8 0x18         tag(24)         CBOR-encoded-data-item
+        // 0x42 0xAB 0xCD    bstr(2)         tx bytes
         let bytes = buf.getBytes(at: buf.readerIndex, length: buf.readableBytes)!
         #expect(bytes[0] == 0x82)  // array(2)
         #expect(bytes[1] == 0x00)  // uint(0) = submitTx
         #expect(bytes[2] == 0x82)  // array(2) era-tagged
         #expect(bytes[3] == 0x06)  // uint(6) = Conway
-        #expect(bytes[4] == 0x42)  // bstr(2)
-        #expect(bytes[5] == 0xAB)
-        #expect(bytes[6] == 0xCD)
+        #expect(bytes[4] == 0xD8)  // tag(24) high byte
+        #expect(bytes[5] == 0x18)  // tag(24) low byte
+        #expect(bytes[6] == 0x42)  // bstr(2)
+        #expect(bytes[7] == 0xAB)
+        #expect(bytes[8] == 0xCD)
     }
 
     @Test func rejectTxEncodesEraAndReason() throws {
@@ -202,8 +205,10 @@ private func makeRejection(era: Era = .conway, bytes: [UInt8] = [0xBA, 0xD0]) ->
         #expect(bytes[1] == 0x02)  // uint(2) = rejectTx
         #expect(bytes[2] == 0x82)  // array(2) era-tagged
         #expect(bytes[3] == 0x04)  // uint(4) = Alonzo era
-        #expect(bytes[4] == 0x41)  // bstr(1)
-        #expect(bytes[5] == 0xFF)
+        #expect(bytes[4] == 0xD8)  // tag(24) high byte
+        #expect(bytes[5] == 0x18)  // tag(24) low byte
+        #expect(bytes[6] == 0x41)  // bstr(1)
+        #expect(bytes[7] == 0xFF)
     }
 
     // MARK: Era round-trip across all eras
