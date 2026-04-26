@@ -113,13 +113,15 @@ extension LedgerQuery {
 
     /// Query the stake distribution across stake pools.
     ///
-    /// Wire form at NtCv9..v20: tag 5.  At NtCv21+ the encoder must switch to
-    /// tag 37 (`GetStakeDistribution2`) — handled in a follow-up commit.
+    /// Wire form is version-conditional: tag 5 at NtCv9..v20, tag 37 at
+    /// NtCv21+ (upstream replaced `GetStakeDistribution` with
+    /// `GetStakeDistribution2` from ShelleyV13).  Picked automatically by
+    /// `NtcQueryGate.tagForStakeDistribution(at:)`.
     public static func stakeDistribution(
         at version: UInt16 = NodeToClientVersion.v16
-    ) throws -> LedgerQuery {
-        try gateCheck(.stakeDistribution, at: version)
-        return .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: simpleQueryBuf(tag: 5)))
+    ) -> LedgerQuery {
+        let tag = NtcQueryGate.tagForStakeDistribution(at: version)
+        return .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: simpleQueryBuf(tag: tag)))
     }
 
     /// Query the current constitution hash.
@@ -294,16 +296,18 @@ extension LedgerQuery {
 
     /// Query pool stake distribution for the given pools; pass `nil` to query all pools.
     ///
-    /// Wire form at NtCv9..v20: tag 21.  At NtCv21+ the encoder must switch to
-    /// tag 36 (`GetPoolDistr2`) — handled in a follow-up commit.
+    /// Wire form is version-conditional: tag 21 at NtCv9..v20, tag 36 at
+    /// NtCv21+ (upstream replaced `GetPoolDistr` with `GetPoolDistr2` from
+    /// ShelleyV13).  Picked automatically by
+    /// `NtcQueryGate.tagForPoolDistr(at:)`.
     public static func poolDistr(
         _ pools: [PoolOperator]?, at version: UInt16 = NodeToClientVersion.v16
     ) throws -> LedgerQuery {
-        try gateCheck(.poolDistr, at: version)
+        let tag = NtcQueryGate.tagForPoolDistr(at: version)
         if let pools {
             var buf = ByteBufferAllocator().buffer(capacity: 32 + pools.count * 32)
             CBORLite.writeArrayHeader(count: 2, into: &buf)
-            CBORLite.writeUInt(21, into: &buf)
+            CBORLite.writeUInt(tag, into: &buf)
             CBORLite.writeArrayHeader(count: 1, into: &buf)
             writeTag258Set(count: pools.count, into: &buf)
             for pool in pools {
@@ -312,7 +316,7 @@ extension LedgerQuery {
             }
             return .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: buf))
         } else {
-            return .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: maybeNothingQueryBuf(tag: 21)))
+            return .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: maybeNothingQueryBuf(tag: tag)))
         }
     }
 

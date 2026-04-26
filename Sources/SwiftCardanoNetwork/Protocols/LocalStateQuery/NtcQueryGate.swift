@@ -147,15 +147,15 @@ public enum NtcQueryGate {
 
     /// The highest NtC wire version at which `kind` is supported, or `nil`
     /// if there is no known upper bound.
+    ///
+    /// `stakeDistribution` and `poolDistr` have no upper bound here — the
+    /// *logical* query is always available; only the wire tag changes (5→37
+    /// and 21→36 at NtCv21+).  Use `tagForStakeDistribution(at:)` /
+    /// `tagForPoolDistr(at:)` to pick the right tag.
     public static func maxVersion(for kind: QueryKind) -> UInt16? {
         switch kind {
         case .proposedProtocolParametersUpdates:
             return NodeToClientVersion.v19
-        case .stakeDistribution, .poolDistr:
-            // Legacy tags 5/21 only.  At v21+ the gate emits the replacement
-            // tags 37/36, so the logical query stays usable — but if a caller
-            // explicitly asks for the legacy tag form, this is the cap.
-            return NodeToClientVersion.v20
         default:
             return nil
         }

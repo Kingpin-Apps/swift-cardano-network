@@ -50,10 +50,39 @@ private func rawBytes(_ lq: LedgerQuery) -> [UInt8] {
         #expect(bytes == [0x81, 0x04])
     }
 
-    @Test func stakeDistributionCBOR() throws {
-        // Expected: CBOR array [5]  →  0x81 0x05
-        let bytes = rawBytes(try .stakeDistribution())
+    @Test func stakeDistributionCBOR_legacy_at_v16() {
+        // At NtCv9..v20 the wire form is tag 5: CBOR array [5]  →  0x81 0x05
+        let bytes = rawBytes(.stakeDistribution(at: NodeToClientVersion.v16))
         #expect(bytes == [0x81, 0x05])
+    }
+
+    @Test func stakeDistributionCBOR_replacement_at_v21() {
+        // At NtCv21+ the wire form switches to tag 37 (GetStakeDistribution2):
+        // CBOR array [37]  →  0x81 0x18 0x25
+        let bytes = rawBytes(.stakeDistribution(at: NodeToClientVersion.v21))
+        #expect(bytes == [0x81, 0x18, 0x25])
+    }
+
+    @Test func stakeDistributionCBOR_replacement_at_v23() {
+        // At NtCv23 same replacement tag 37 expected.
+        let bytes = rawBytes(.stakeDistribution(at: NodeToClientVersion.v23))
+        #expect(bytes == [0x81, 0x18, 0x25])
+    }
+
+    @Test func poolDistrCBOR_legacy_at_v16() throws {
+        // At NtCv9..v20 the wire form for poolDistr(nil) is [21, []]:
+        //   array(2) uint(21) array(0)  →  0x82 0x15 0x80
+        let q = try LedgerQuery.poolDistr(nil, at: NodeToClientVersion.v16)
+        let bytes = rawBytes(q)
+        #expect(bytes == [0x82, 0x15, 0x80])
+    }
+
+    @Test func poolDistrCBOR_replacement_at_v21() throws {
+        // At NtCv21+ the wire form switches to tag 36 (GetPoolDistr2):
+        //   array(2) uint(36) array(0)  →  0x82 0x18 0x24 0x80
+        let q = try LedgerQuery.poolDistr(nil, at: NodeToClientVersion.v21)
+        let bytes = rawBytes(q)
+        #expect(bytes == [0x82, 0x18, 0x24, 0x80])
     }
 
     @Test func genesisConfigCBOR() {
@@ -103,7 +132,7 @@ private func rawBytes(_ lq: LedgerQuery) -> [UInt8] {
     @Test func allSimpleQueriesHaveConwayEra() throws {
         let queries: [LedgerQuery] = [
             .ledgerTip(), .epochNo(), .currentProtocolParameters(),
-            try .proposedProtocolParametersUpdates(), try .stakeDistribution(),
+            try .proposedProtocolParametersUpdates(), .stakeDistribution(),
             .genesisConfig(), try .governanceState(), try .constitutionHash(),
             try .ratifyState(at: NodeToClientVersion.v17),
         ]
