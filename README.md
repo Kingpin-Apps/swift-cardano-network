@@ -13,8 +13,8 @@ Add the package to your `Package.swift`. The typed API (decoded `Block`, `Transa
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/your-org/swift-cardano-network.git", from: "0.1.0"),
-    .package(url: "https://github.com/Kingpin-Apps/swift-cardano-core.git", from: "0.1.0"),
+    .package(url: "https://github.com/Kingpin-Apps/swift-cardano-network.git", from: "1.0.0"),
+    .package(url: "https://github.com/Kingpin-Apps/swift-cardano-core.git", from: "0.3.15"),
 ],
 targets: [
     .target(
