@@ -85,6 +85,41 @@ private func rawBytes(_ lq: LedgerQuery) -> [UInt8] {
         #expect(bytes == [0x82, 0x18, 0x24, 0x80])
     }
 
+    @Test func bigLedgerPeerSnapshotCBOR_legacy_at_v19() throws {
+        // At NtCv19..v22 emit `[34]` (legacy form):
+        //   array(1) uint(34)  →  0x81 0x18 0x22
+        let q = try LedgerQuery.bigLedgerPeerSnapshot(at: NodeToClientVersion.v19)
+        let bytes = rawBytes(q)
+        #expect(bytes == [0x81, 0x18, 0x22])
+    }
+
+    @Test func bigLedgerPeerSnapshotCBOR_legacy_at_v22() throws {
+        // Still legacy at v22.
+        let q = try LedgerQuery.bigLedgerPeerSnapshot(at: NodeToClientVersion.v22)
+        let bytes = rawBytes(q)
+        #expect(bytes == [0x81, 0x18, 0x22])
+    }
+
+    @Test func bigLedgerPeerSnapshotCBOR_srv_at_v23() throws {
+        // At NtCv23+ emit `[34, 1]` (SRV form, peerKind=BigLedgerPeers):
+        //   array(2) uint(34) uint(1)  →  0x82 0x18 0x22 0x01
+        let q = try LedgerQuery.bigLedgerPeerSnapshot(at: NodeToClientVersion.v23)
+        let bytes = rawBytes(q)
+        #expect(bytes == [0x82, 0x18, 0x22, 0x01])
+    }
+
+    @Test func bigLedgerPeerSnapshot_throwsBelowV19() throws {
+        // Gate should refuse at v18 since the query was added at NtCv19.
+        do {
+            _ = try LedgerQuery.bigLedgerPeerSnapshot(at: NodeToClientVersion.v18)
+            Issue.record("Expected queryNotSupported error")
+        } catch let LocalStateQueryError.queryNotSupported(name, negotiated, required) {
+            #expect(name == "bigLedgerPeerSnapshot")
+            #expect(negotiated == NodeToClientVersion.v18)
+            #expect(required == NodeToClientVersion.v19)
+        }
+    }
+
     @Test func genesisConfigCBOR() {
         // Expected: CBOR array [11]  →  0x81 0x0B
         let bytes = rawBytes(.genesisConfig())

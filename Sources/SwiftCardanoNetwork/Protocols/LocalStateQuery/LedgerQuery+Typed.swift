@@ -166,14 +166,30 @@ extension LedgerQuery {
 
     /// Query the big ledger peer snapshot for use in peer bootstrapping.
     ///
-    /// Wire form at NtCv19..v22: bare `[34]`.  At NtCv23+ the encoder must
-    /// switch to the SRV form `[34, peerKindByte]` — handled in a follow-up
-    /// commit.
+    /// Wire form is version-conditional:
+    /// - NtCv19..v22 (= ShelleyV11..V14): legacy `[34]`. Upstream's decoder
+    ///   maps this to `(SRVFlag=False, peerKind=BigLedgerPeers)`.
+    /// - NtCv23+ (= ShelleyV15+): new form `[34, 1]` where `1` = BigLedgerPeers
+    ///   (the SRV form added at ShelleyV15).
+    ///
+    /// Picked automatically by `NtcQueryGate.bigLedgerPeerSnapshotEncoding(at:)`.
     public static func bigLedgerPeerSnapshot(
         at version: UInt16 = NodeToClientVersion.v16
     ) throws -> LedgerQuery {
         try gateCheck(.bigLedgerPeerSnapshot, at: version)
-        return .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: simpleQueryBuf(tag: 34)))
+        let buf: ByteBuffer
+        switch NtcQueryGate.bigLedgerPeerSnapshotEncoding(at: version) {
+        case .legacy:
+            buf = simpleQueryBuf(tag: 34)
+        case .srv:
+            // [34, peerKindByte=1 for BigLedgerPeers]
+            var b = ByteBufferAllocator().buffer(capacity: 6)
+            CBORLite.writeArrayHeader(count: 2, into: &b)
+            CBORLite.writeUInt(34, into: &b)
+            CBORLite.writeUInt(1, into: &b)
+            buf = b
+        }
+        return .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: buf))
     }
 
     // MARK: - Parameterised queries
