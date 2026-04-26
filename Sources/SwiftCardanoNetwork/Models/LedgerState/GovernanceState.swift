@@ -338,14 +338,21 @@ public struct GovernanceCommitteeState: CBORSerializable, Sendable {
 
 /// The future protocol parameters update status.
 ///
-/// Wire: list[1..2]:
-///   [0] uint(0) = NoPParamsUpdate
-///   [1, params] uint(1) = DefiniteUpdate (approved, takes effect next epoch)
-///   [2, params] uint(2) = PotentialUpdate (candidate, may or may not be enacted)
+/// Wire (Conway): list[1..2] where the second element, when present, is a
+/// `Maybe ProtocolParameters` encoded as a Haskell list (`[]` for Nothing,
+/// `[params]` for Just).  In practice the node has been observed to emit:
+///
+///   [0]              uint(0)   = NoPParamsUpdate
+///   [1, []]                    = DefiniteUpdate Nothing
+///   [1, [params]]              = DefiniteUpdate (Just params)
+///   [2, []]                    = PotentialUpdate Nothing
+///   [2, [params]]              = PotentialUpdate (Just params)
+///
+/// `params` is the n2c 31-element positional `ProtocolParameters` array.
 public enum FuturePParams: CBORSerializable, Sendable {
     case noUpdate
-    case definiteUpdate(ProtocolParameters)
-    case potentialUpdate(ProtocolParameters)
+    case definiteUpdate(ProtocolParameters?)
+    case potentialUpdate(ProtocolParameters?)
 
     public init(from primitive: Primitive) throws {
         guard case .list(let f) = primitive, !f.isEmpty else {
@@ -364,18 +371,37 @@ public enum FuturePParams: CBORSerializable, Sendable {
         case 0:
             self = .noUpdate
         case 1:
-            guard f.count >= 2 else {
-                throw LedgerStateDecodingError.unexpectedFormat("FuturePParams: definiteUpdate missing params")
-            }
-            self = .definiteUpdate(try ProtocolParameters(from: f[1]))
+            self = .definiteUpdate(try Self.decodeMaybeParams(f, label: "definiteUpdate"))
         case 2:
-            guard f.count >= 2 else {
-                throw LedgerStateDecodingError.unexpectedFormat("FuturePParams: potentialUpdate missing params")
-            }
-            self = .potentialUpdate(try ProtocolParameters(from: f[1]))
+            self = .potentialUpdate(try Self.decodeMaybeParams(f, label: "potentialUpdate"))
         default:
             throw LedgerStateDecodingError.unexpectedFormat("FuturePParams: unknown tag \(tag)")
         }
+    }
+
+    /// Decodes the Haskell-style `Maybe ProtocolParameters` that sits at
+    /// index 1 of the outer list — accepting either:
+    /// - the wrapped form `[]` (Nothing) / `[<31-element pparams list>]` (Just), or
+    /// - the unwrapped form where the params list itself is at index 1
+    ///   (older node encodings observed in the wild).
+    private static func decodeMaybeParams(
+        _ f: [Primitive], label: String
+    ) throws -> ProtocolParameters? {
+        guard f.count >= 2 else { return nil }
+        guard case .list(let inner) = f[1] else {
+            // Fallback: treat any non-list f[1] as a direct params primitive.
+            return try ProtocolParameters(from: f[1])
+        }
+        if inner.isEmpty { return nil }
+        // Heuristic: the node emits `[<31-element pparams list>]` when the
+        // wrapper is `Just`, but earlier encodings put the 31-element pparams
+        // list directly at f[1].  The 31-element pparams list also contains
+        // exactly 31 elements at the top level — distinguish by looking at
+        // inner.count.
+        if inner.count == 1, case .list = inner[0] {
+            return try ProtocolParameters(from: inner[0])
+        }
+        return try ProtocolParameters(from: f[1])
     }
 
     public func toPrimitive() throws -> Primitive {
@@ -383,10 +409,15 @@ public enum FuturePParams: CBORSerializable, Sendable {
         case .noUpdate:
             return .list([.uint(0)])
         case .definiteUpdate(let pp):
-            return .list([.uint(1), try pp.toPrimitive()])
+            return .list([.uint(1), try Self.encodeMaybeParams(pp)])
         case .potentialUpdate(let pp):
-            return .list([.uint(2), try pp.toPrimitive()])
+            return .list([.uint(2), try Self.encodeMaybeParams(pp)])
         }
+    }
+
+    private static func encodeMaybeParams(_ pp: ProtocolParameters?) throws -> Primitive {
+        guard let pp else { return .list([]) }
+        return .list([try pp.toPrimitive()])
     }
 }
 
