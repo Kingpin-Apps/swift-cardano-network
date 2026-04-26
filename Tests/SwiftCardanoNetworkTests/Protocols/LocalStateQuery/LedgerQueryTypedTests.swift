@@ -23,54 +23,54 @@ private func rawBytes(_ lq: LedgerQuery) -> [UInt8] {
 @Suite("LedgerQuery typed constructors") struct LedgerQueryTypedTests {
 
     @Test func ledgerTipQueryEraIsConway() {
-        #expect(LedgerQuery.ledgerTip.rawQuery.era == 6)
+        #expect(LedgerQuery.ledgerTip().rawQuery.era == 6)
     }
 
     @Test func ledgerTipQueryCBOR() {
         // Expected: CBOR array [0]  →  0x81 0x00
-        let bytes = rawBytes(.ledgerTip)
+        let bytes = rawBytes(.ledgerTip())
         #expect(bytes == [0x81, 0x00])
     }
 
     @Test func epochNoQueryCBOR() {
         // Expected: CBOR array [1]  →  0x81 0x01
-        let bytes = rawBytes(.epochNo)
+        let bytes = rawBytes(.epochNo())
         #expect(bytes == [0x81, 0x01])
     }
 
     @Test func currentProtocolParametersCBOR() {
         // Expected: CBOR array [3]  →  0x81 0x03
-        let bytes = rawBytes(.currentProtocolParameters)
+        let bytes = rawBytes(.currentProtocolParameters())
         #expect(bytes == [0x81, 0x03])
     }
 
-    @Test func proposedProtocolParametersUpdatesCBOR() {
+    @Test func proposedProtocolParametersUpdatesCBOR() throws {
         // Expected: CBOR array [4]  →  0x81 0x04
-        let bytes = rawBytes(.proposedProtocolParametersUpdates)
+        let bytes = rawBytes(try .proposedProtocolParametersUpdates())
         #expect(bytes == [0x81, 0x04])
     }
 
-    @Test func stakeDistributionCBOR() {
+    @Test func stakeDistributionCBOR() throws {
         // Expected: CBOR array [5]  →  0x81 0x05
-        let bytes = rawBytes(.stakeDistribution)
+        let bytes = rawBytes(try .stakeDistribution())
         #expect(bytes == [0x81, 0x05])
     }
 
     @Test func genesisConfigCBOR() {
         // Expected: CBOR array [11]  →  0x81 0x0B
-        let bytes = rawBytes(.genesisConfig)
+        let bytes = rawBytes(.genesisConfig())
         #expect(bytes == [0x81, 0x0B])
     }
 
-    @Test func governanceStateCBOR() {
+    @Test func governanceStateCBOR() throws {
         // Expected: CBOR array [24]  →  0x81 0x18 0x18
-        let bytes = rawBytes(.governanceState)
+        let bytes = rawBytes(try .governanceState())
         #expect(bytes == [0x81, 0x18, 0x18])
     }
 
-    @Test func constitutionHashCBOR() {
+    @Test func constitutionHashCBOR() throws {
         // Expected: CBOR array [23]  →  0x81 0x17
-        let bytes = rawBytes(.constitutionHash)
+        let bytes = rawBytes(try .constitutionHash())
         #expect(bytes == [0x81, 0x17])
     }
 
@@ -100,11 +100,12 @@ private func rawBytes(_ lq: LedgerQuery) -> [UInt8] {
         #expect(bytes[1] == 0x0f)  // query tag 15
     }
 
-    @Test func allSimpleQueriesHaveConwayEra() {
+    @Test func allSimpleQueriesHaveConwayEra() throws {
         let queries: [LedgerQuery] = [
-            .ledgerTip, .epochNo, .currentProtocolParameters,
-            .proposedProtocolParametersUpdates, .stakeDistribution,
-            .genesisConfig, .governanceState, .constitutionHash, .ratifyState,
+            .ledgerTip(), .epochNo(), .currentProtocolParameters(),
+            try .proposedProtocolParametersUpdates(), try .stakeDistribution(),
+            .genesisConfig(), try .governanceState(), try .constitutionHash(),
+            try .ratifyState(at: NodeToClientVersion.v17),
         ]
         for q in queries {
             #expect(q.rawQuery.era == 6, "Expected Conway era for \(q)")
@@ -120,9 +121,9 @@ private func rawBytes(_ lq: LedgerQuery) -> [UInt8] {
         #expect(lq.rawQuery.rawCBOR.readableBytes == 2)
     }
 
-    @Test func ratifyStateCBOR() {
+    @Test func ratifyStateCBOR() throws {
         // Expected: CBOR array [32]  →  0x81 0x18 0x20
-        let bytes = rawBytes(.ratifyState)
+        let bytes = rawBytes(try .ratifyState(at: NodeToClientVersion.v17))
         #expect(bytes == [0x81, 0x18, 0x20])
     }
 

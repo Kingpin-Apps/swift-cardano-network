@@ -233,6 +233,11 @@ struct GovernanceStateLiveTests {
 
         var cfg = CardanoNetworkConfiguration()
         cfg.connection = connConfig
+        // Conway-era queries (governanceState, ratifyState, bigLedgerPeerSnapshot)
+        // require the gate at v16+ / v17+ / v19+ respectively.  Propose the full
+        // modern range so we negotiate whatever the node supports and the gate
+        // accepts the query.
+        cfg.protocol.ntcVersions = NodeToClientVersion.allKnown
 
         let conn = try await CardanoNode.connectToClient(config: cfg, group: group)
         defer { Task { await conn.close() } }
@@ -268,6 +273,11 @@ struct RatifyStateLiveTests {
 
         var cfg = CardanoNetworkConfiguration()
         cfg.connection = connConfig
+        // Conway-era queries (governanceState, ratifyState, bigLedgerPeerSnapshot)
+        // require the gate at v16+ / v17+ / v19+ respectively.  Propose the full
+        // modern range so we negotiate whatever the node supports and the gate
+        // accepts the query.
+        cfg.protocol.ntcVersions = NodeToClientVersion.allKnown
 
         let conn = try await CardanoNode.connectToClient(config: cfg, group: group)
         defer { Task { await conn.close() } }
@@ -304,6 +314,11 @@ struct BigLedgerPeerSnapshotLiveTests {
 
         var cfg = CardanoNetworkConfiguration()
         cfg.connection = connConfig
+        // Conway-era queries (governanceState, ratifyState, bigLedgerPeerSnapshot)
+        // require the gate at v16+ / v17+ / v19+ respectively.  Propose the full
+        // modern range so we negotiate whatever the node supports and the gate
+        // accepts the query.
+        cfg.protocol.ntcVersions = NodeToClientVersion.allKnown
 
         let conn = try await CardanoNode.connectToClient(config: cfg, group: group)
         defer { Task { await conn.close() } }

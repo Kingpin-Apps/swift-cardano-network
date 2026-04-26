@@ -49,13 +49,13 @@ extension LocalStateQueryClient {
 
     /// Query the UTxO set filtered to the given addresses.
     public func queryUTxO(for addresses: [Address]) async throws -> [UTxO] {
-        let result = try await query(.utxoByAddress(addresses))
+        let result = try await query(.utxoByAddress(addresses, at: negotiatedVersion))
         return try result.decodeUTxOs()
     }
 
     /// Query the UTxO set filtered to the given transaction inputs.
     public func queryUTxO(for inputs: [TransactionInput]) async throws -> [UTxO] {
-        let q = try LedgerQuery.utxoByTxIn(inputs)
+        let q = try LedgerQuery.utxoByTxIn(inputs, at: negotiatedVersion)
         let result = try await query(q)
         return try result.decodeUTxOs()
     }
@@ -64,7 +64,7 @@ extension LocalStateQueryClient {
     ///
     /// - Warning: This can return a very large response on mainnet.
     public func queryWholeUTxO() async throws -> [UTxO] {
-        let result = try await query(.utxoWhole)
+        let result = try await query(.utxoWhole(at: negotiatedVersion))
         return try result.decodeUTxOs()
     }
 
@@ -72,14 +72,15 @@ extension LocalStateQueryClient {
 
     /// Query the current protocol parameters, decoded from the node's CBOR response.
     public func queryProtocolParameters() async throws -> ProtocolParameters {
-        let result = try await query(.currentProtocolParameters)
+        let result = try await query(.currentProtocolParameters(at: negotiatedVersion))
         let data = Data(result.rawCBOR.readableBytesView)
         return try ProtocolParameters.fromCBOR(data: data)
     }
 
     /// Query the current protocol parameters, decoded from the node's CBOR response.
     public func queryProposedProtocolParametersUpdates() async throws -> ProposedProtocolParamUpdates {
-        let result = try await query(.proposedProtocolParametersUpdates)
+        let q = try LedgerQuery.proposedProtocolParametersUpdates(at: negotiatedVersion)
+        let result = try await query(q)
         let data = Data(result.rawCBOR.readableBytesView)
         return try ProposedProtocolParamUpdates.fromCBOR(data: data)
     }
@@ -89,7 +90,8 @@ extension LocalStateQueryClient {
     /// Returns `nil` when there are no pending future parameters (the node returns an
     /// empty CBOR list `[]` for `Nothing` in the `Maybe PParams` response).
     public func queryFuturePParams() async throws -> ProtocolParameters? {
-        let result = try await query(.futurePParams)
+        let q = try LedgerQuery.futurePParams(at: negotiatedVersion)
+        let result = try await query(q)
         var buf = result.rawCBOR
         // Maybe PParams: [] = Nothing (no future params), [params] = Just params
         let count = try CBORLite.readArrayHeader(from: &buf)
@@ -105,7 +107,7 @@ extension LocalStateQueryClient {
     /// The node returns a CBOR `[slot, hash]` pair; this decodes it using CBORLite
     /// and assembles the existing `Point` type (no new dependency on CardanoCore).
     public func queryLedgerTip() async throws -> Point {
-        let result = try await query(.ledgerTip)
+        let result = try await query(.ledgerTip(at: negotiatedVersion))
         var buf = result.rawCBOR
         let count = try CBORLite.readArrayHeader(from: &buf)
         guard count == 2 else {
@@ -120,7 +122,7 @@ extension LocalStateQueryClient {
 
     /// Query the current epoch number.
     public func queryEpochNo() async throws -> EpochNumber {
-        let result = try await query(.epochNo)
+        let result = try await query(.epochNo(at: negotiatedVersion))
         var buf = result.rawCBOR
         let epoch = try CBORLite.readUInt(from: &buf)
         return EpochNumber(epoch)
@@ -130,7 +132,7 @@ extension LocalStateQueryClient {
 
     /// Query the complete stake distribution for specific pools, or all pools if `nil`.
     public func queryPoolDistr(_ pools: [PoolOperator]? = nil) async throws -> PoolDistr {
-        let q = try LedgerQuery.poolDistr(pools)
+        let q = try LedgerQuery.poolDistr(pools, at: negotiatedVersion)
         let result = try await query(q)
         return try result.decode(PoolDistr.self)
     }
@@ -139,34 +141,34 @@ extension LocalStateQueryClient {
 
     /// Query the set of all registered stake pool IDs.
     public func queryStakePools() async throws -> StakePools {
-        let result = try await query(.stakePools)
+        let result = try await query(.stakePools(at: negotiatedVersion))
         return try result.decode(StakePools.self)
     }
 
     /// Query stake pool parameters for the given pool operators.
     public func queryStakePoolParams(for pools: [PoolOperator]) async throws -> StakePoolParams {
-        let q = try LedgerQuery.stakePoolParams(pools)
+        let q = try LedgerQuery.stakePoolParams(pools, at: negotiatedVersion)
         let result = try await query(q)
         return try result.decode(StakePoolParams.self)
     }
 
     /// Query per-pool state for the given pools, or all pools if `nil`.
     public func queryPoolState(_ pools: [PoolOperator]? = nil) async throws -> PoolState {
-        let q = try LedgerQuery.poolState(pools)
+        let q = try LedgerQuery.poolState(pools, at: negotiatedVersion)
         let result = try await query(q)
         return try result.decode(PoolState.self)
     }
 
     /// Query stake snapshots (mark/set/go) for a specific pool, or all pools if `nil`.
     public func queryStakeSnapshots(for pool: PoolOperator? = nil) async throws -> StakeSnapshots {
-        let q = try LedgerQuery.stakeSnapshots(pool)
+        let q = try LedgerQuery.stakeSnapshots(pool, at: negotiatedVersion)
         let result = try await query(q)
         return try result.decode(StakeSnapshots.self)
     }
 
     /// Query the SPO stake distribution for the given pools, or all pools if `nil`.
     public func querySPOStakeDistr(_ pools: [PoolOperator]? = nil) async throws -> SPOStakeDistribution {
-        let q = try LedgerQuery.spoStakeDistr(pools)
+        let q = try LedgerQuery.spoStakeDistr(pools, at: negotiatedVersion)
         let result = try await query(q)
         return try result.decode(SPOStakeDistribution.self)
     }
@@ -177,20 +179,20 @@ extension LocalStateQueryClient {
     public func queryNonMyopicMemberRewards(
         _ inputs: [NonMyopicMemberRewardsInput]
     ) async throws -> NonMyopicMemberRewards {
-        let q = try LedgerQuery.nonMyopicMemberRewards(inputs)
+        let q = try LedgerQuery.nonMyopicMemberRewards(inputs, at: negotiatedVersion)
         let result = try await query(q)
         return try result.decode(NonMyopicMemberRewards.self)
     }
 
     /// Query per-pool reward information for the current epoch.
     public func queryRewardInfoPools() async throws -> RewardInfoPools {
-        let result = try await query(.rewardInfoPools)
+        let result = try await query(.rewardInfoPools(at: negotiatedVersion))
         return try result.decode(RewardInfoPools.self)
     }
 
     /// Query detailed reward provenance data for the current epoch.
     public func queryRewardProvenance() async throws -> RewardProvenance {
-        let result = try await query(.rewardProvenance)
+        let result = try await query(.rewardProvenance(at: negotiatedVersion))
         return try result.decode(RewardProvenance.self)
     }
 
@@ -200,7 +202,7 @@ extension LocalStateQueryClient {
     public func queryFilteredDelegationsAndRewardAccounts(
         _ credentials: [any Credential]
     ) async throws -> FilteredDelegationsAndRewards {
-        let q = try LedgerQuery.filteredDelegationsAndRewardAccounts(credentials)
+        let q = try LedgerQuery.filteredDelegationsAndRewardAccounts(credentials, at: negotiatedVersion)
         let result = try await query(q)
         return try result.decode(FilteredDelegationsAndRewards.self)
     }
@@ -209,7 +211,7 @@ extension LocalStateQueryClient {
     public func queryStakeDelegDeposits(
         _ credentials: [any Credential]
     ) async throws -> StakeDelegDeposits {
-        let q = try LedgerQuery.stakeDelegDeposits(credentials)
+        let q = try LedgerQuery.stakeDelegDeposits(credentials, at: negotiatedVersion)
         let result = try await query(q)
         return try result.decode(StakeDelegDeposits.self)
     }
@@ -218,38 +220,42 @@ extension LocalStateQueryClient {
 
     /// Query the current Conway governance state.
     public func queryGovernanceState() async throws -> GovernanceState {
-        let result = try await query(.governanceState)
+        let q = try LedgerQuery.governanceState(at: negotiatedVersion)
+        let result = try await query(q)
         return try result.decode(GovernanceState.self)
     }
 
     /// Query the current constitution.
     public func queryConstitution() async throws -> LedgerConstitution {
-        let result = try await query(.constitutionHash)
+        let q = try LedgerQuery.constitutionHash(at: negotiatedVersion)
+        let result = try await query(q)
         return try result.decode(LedgerConstitution.self)
     }
 
     /// Query the current ratification state.
     public func queryRatifyState() async throws -> RatifyState {
-        let result = try await query(.ratifyState)
+        let q = try LedgerQuery.ratifyState(at: negotiatedVersion)
+        let result = try await query(q)
         return try result.decode(RatifyState.self)
     }
 
     /// Query the current account state (treasury and reserves).
     public func queryAccountState() async throws -> AccountState {
-        let result = try await query(.accountState)
+        let q = try LedgerQuery.accountState(at: negotiatedVersion)
+        let result = try await query(q)
         return try result.decode(AccountState.self)
     }
 
     /// Query on-chain state for the given DReps.
     public func queryDRepState(_ dreps: [DRep]) async throws -> DRepState {
-        let q = try LedgerQuery.drepState(dreps)
+        let q = try LedgerQuery.drepState(dreps, at: negotiatedVersion)
         let result = try await query(q)
         return try result.decode(DRepState.self)
     }
 
     /// Query total delegated stake for the given DReps.
     public func queryDRepStakeDistr(_ dreps: [DRep]) async throws -> DRepStakeDistribution {
-        let q = try LedgerQuery.drepStakeDistr(dreps)
+        let q = try LedgerQuery.drepStakeDistr(dreps, at: negotiatedVersion)
         let result = try await query(q)
         return try result.decode(DRepStakeDistribution.self)
     }
@@ -258,7 +264,7 @@ extension LocalStateQueryClient {
     public func queryCommitteeMembersState(
         _ filter: CommitteeMembersFilter = .all
     ) async throws -> CommitteeMembersState {
-        let q = try LedgerQuery.committeeMembersState(filter)
+        let q = try LedgerQuery.committeeMembersState(filter, at: negotiatedVersion)
         let result = try await query(q)
         return try result.decode(CommitteeMembersState.self)
     }
@@ -267,14 +273,14 @@ extension LocalStateQueryClient {
     public func queryFilteredVoteDelegatees(
         _ credentials: [any Credential]
     ) async throws -> VoteDelegatees {
-        let q = try LedgerQuery.filteredVoteDelegatees(credentials)
+        let q = try LedgerQuery.filteredVoteDelegatees(credentials, at: negotiatedVersion)
         let result = try await query(q)
         return try result.decode(VoteDelegatees.self)
     }
 
     /// Query active governance proposals matching the given governance action IDs.
     public func queryProposals(_ govActionIDs: [GovActionID]) async throws -> ActiveProposals {
-        let q = try LedgerQuery.proposals(govActionIDs)
+        let q = try LedgerQuery.proposals(govActionIDs, at: negotiatedVersion)
         let result = try await query(q)
         return try result.decode(ActiveProposals.self)
     }
@@ -283,13 +289,14 @@ extension LocalStateQueryClient {
 
     /// Query the genesis configuration for the current era.
     public func queryGenesisConfig() async throws -> GenesisConfig {
-        let result = try await query(.genesisConfig)
+        let result = try await query(.genesisConfig(at: negotiatedVersion))
         return try result.decode(GenesisConfig.self)
     }
 
     /// Query the big ledger peer snapshot for peer bootstrapping.
     public func queryBigLedgerPeerSnapshot() async throws -> BigLedgerPeerSnapshot {
-        let result = try await query(.bigLedgerPeerSnapshot)
+        let q = try LedgerQuery.bigLedgerPeerSnapshot(at: negotiatedVersion)
+        let result = try await query(q)
         return try result.decode(BigLedgerPeerSnapshot.self)
     }
 }

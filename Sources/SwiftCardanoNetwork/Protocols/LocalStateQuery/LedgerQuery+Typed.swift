@@ -3,138 +3,183 @@ import SwiftCardanoCore
 
 // MARK: - Typed LedgerQuery constructors
 //
-// Each factory method builds the era-tagged CBOR query payload that
-// LocalStateQueryCodec expects in RawQuery.rawCBOR, then wraps it in
-// LedgerQuery.raw(_:).  The existing codec, driver, and client are
-// completely unchanged; only the query construction is new here.
+// Each factory builds the era-tagged CBOR query payload that
+// `LocalStateQueryCodec` expects, wrapped in `LedgerQuery.raw(_:)`.  Every
+// factory takes `at: UInt16` — the negotiated NtC wire version — so it can:
+//   1. refuse early (`LocalStateQueryError.queryNotSupported`) when the
+//      requested query is outside the upstream `blockQueryIsSupportedOnVersion`
+//      gate for that version;
+//   2. (in subsequent commits) emit the correct CBOR tag for queries whose
+//      wire form changed across versions, e.g. `stakeDistribution` 5 → 37 at
+//      NtCv21+.
 //
-// Query tag reference (pallas / Ouroboros mini-protocol spec, Conway era):
+// The `at:` parameter defaults to `NodeToClientVersion.v16` so direct callers
+// and tests that don't go through `NodeToClientConnection` still build queries
+// for the Conway-era stable surface.  `LocalStateQueryClient`'s typed wrappers
+// always pass `negotiatedVersion`.  When `at == 0` (the LocalStateQueryClient
+// no-handshake default) gate checks are skipped — the caller is trusted.
+//
+// Query tag reference (Conway era, current upstream HEAD):
 //   GetLedgerTip                            = 0
 //   GetEpochNo                              = 1
-//   GetNonMyopicMemberRewards               = 2   (+ Tag-258 set of coin | credential inputs)
+//   GetNonMyopicMemberRewards               = 2   (+ Tag-258 set)
 //   GetCurrentPParams                       = 3
-//   GetProposedPParamsUpdates               = 4
-//   GetStakeDistribution                    = 5
-//   GetUTxOByAddress                        = 6   (+ Tag-258 set of addr bstrs)
+//   GetProposedPParamsUpdates               = 4   (removed at NtCv20+)
+//   GetStakeDistribution                    = 5   (removed at NtCv21+; emit tag 37)
+//   GetUTxOByAddress                        = 6
 //   GetUTxOWhole                            = 7
-//   GetFilteredDelegationAndRewardAccounts  = 10  (+ Tag-258 set of credentials)
+//   GetFilteredDelegationAndRewardAccounts  = 10
 //   GetGenesisConfig                        = 11
 //   GetRewardProvenance                     = 14
-//   GetUTxOByTxIn                           = 15  (+ Tag-258 set of tx inputs)
+//   GetUTxOByTxIn                           = 15
 //   GetStakePools                           = 16
-//   GetStakePoolParams                      = 17  (+ Tag-258 set of pool keys)
+//   GetStakePoolParams                      = 17
 //   GetRewardInfoPools                      = 18
-//   GetPoolState                            = 19  (+ optional Tag-258 set of pool keys)
-//   GetStakeSnapshots                       = 20  (+ optional pool key hash)
-//   GetPoolDistr                            = 21  (+ optional Tag-258 set of pool keys)
-//   GetStakeDelegDeposits                   = 22  (+ Tag-258 set of stake credentials)
-//   GetConstitution                         = 23
-//   GetGovState                             = 24
-//   GetDRepState                            = 25  (+ Tag-258 set of DRep credentials)
-//   GetDRepStakeDistr                       = 26  (+ Tag-258 set of DRep credentials)
-//   GetCommitteeMembersState                = 27  (+ cold cred set, hot cred set, status set)
-//   GetFilteredVoteDelegatees               = 28  (+ Tag-258 set of stake credentials)
-//   GetAccountState                         = 29
-//   GetSPOStakeDistr                        = 30  (+ optional Tag-258 set of pool keys)
-//   GetProposals                            = 31  (+ Tag-258 set of GovActionIDs)
-//   GetRatifyState                          = 32
-//   GetFuturePParams                        = 33
-//   GetBigLedgerPeerSnapshot                = 34
+//   GetPoolState                            = 19
+//   GetStakeSnapshots                       = 20
+//   GetPoolDistr                            = 21  (removed at NtCv21+; emit tag 36)
+//   GetStakeDelegDeposits                   = 22
+//   GetConstitution                         = 23  (NtCv16+)
+//   GetGovState                             = 24  (NtCv16+)
+//   GetDRepState                            = 25  (NtCv16+)
+//   GetDRepStakeDistr                       = 26  (NtCv16+)
+//   GetCommitteeMembersState                = 27  (NtCv16+)
+//   GetFilteredVoteDelegatees               = 28  (NtCv16+)
+//   GetAccountState                         = 29  (NtCv16+)
+//   GetSPOStakeDistr                        = 30  (NtCv16+)
+//   GetProposals                            = 31  (NtCv17+)
+//   GetRatifyState                          = 32  (NtCv17+)
+//   GetFuturePParams                        = 33  (NtCv18+)
+//   GetBigLedgerPeerSnapshot                = 34  (NtCv19+; SRV form at NtCv23+)
 
 extension LedgerQuery {
 
-    // MARK: - Simple (no-parameter) queries
+    // MARK: - Always-on queries (no version gating; never throw)
 
     /// Query the current ledger tip (slot + block hash).
-    public static var ledgerTip: LedgerQuery {
+    public static func ledgerTip(at version: UInt16 = NodeToClientVersion.v16) -> LedgerQuery {
         .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: simpleQueryBuf(tag: 0)))
     }
 
     /// Query the current epoch number.
-    public static var epochNo: LedgerQuery {
+    public static func epochNo(at version: UInt16 = NodeToClientVersion.v16) -> LedgerQuery {
         .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: simpleQueryBuf(tag: 1)))
     }
 
     /// Query the current protocol parameters.
-    public static var currentProtocolParameters: LedgerQuery {
+    public static func currentProtocolParameters(at version: UInt16 = NodeToClientVersion.v16) -> LedgerQuery {
         .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: simpleQueryBuf(tag: 3)))
-    }
-
-    /// Query any proposed (but not yet enacted) protocol parameter updates.
-    public static var proposedProtocolParametersUpdates: LedgerQuery {
-        .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: simpleQueryBuf(tag: 4)))
-    }
-
-    /// Query the stake distribution across stake pools.
-    public static var stakeDistribution: LedgerQuery {
-        .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: simpleQueryBuf(tag: 5)))
     }
 
     /// Query the complete UTxO set (all unspent outputs in the ledger).
     ///
     /// - Warning: This can be a very large response on mainnet. Prefer
     ///   `utxoByAddress` or `utxoByTxIn` for targeted queries.
-    public static var utxoWhole: LedgerQuery {
+    public static func utxoWhole(at version: UInt16 = NodeToClientVersion.v16) -> LedgerQuery {
         .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: simpleQueryBuf(tag: 7)))
     }
 
     /// Query the genesis configuration for the current era.
-    public static var genesisConfig: LedgerQuery {
+    public static func genesisConfig(at version: UInt16 = NodeToClientVersion.v16) -> LedgerQuery {
         .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: simpleQueryBuf(tag: 11)))
     }
 
     /// Query detailed reward provenance data for the current epoch.
-    public static var rewardProvenance: LedgerQuery {
+    public static func rewardProvenance(at version: UInt16 = NodeToClientVersion.v16) -> LedgerQuery {
         .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: simpleQueryBuf(tag: 14)))
     }
 
     /// Query the set of all registered stake pool IDs.
-    public static var stakePools: LedgerQuery {
+    public static func stakePools(at version: UInt16 = NodeToClientVersion.v16) -> LedgerQuery {
         .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: simpleQueryBuf(tag: 16)))
     }
 
     /// Query per-pool reward information for the current epoch.
-    public static var rewardInfoPools: LedgerQuery {
+    public static func rewardInfoPools(at version: UInt16 = NodeToClientVersion.v16) -> LedgerQuery {
         .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: simpleQueryBuf(tag: 18)))
     }
 
-    /// Query the current Conway governance state.
-    public static var governanceState: LedgerQuery {
-        .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: simpleQueryBuf(tag: 24)))
+    // MARK: - Version-gated queries (may throw queryNotSupported)
+
+    /// Query any proposed (but not yet enacted) protocol parameter updates.
+    ///
+    /// Available at NtC v9..v19; removed from NtCv20+ upstream.
+    public static func proposedProtocolParametersUpdates(
+        at version: UInt16 = NodeToClientVersion.v16
+    ) throws -> LedgerQuery {
+        try gateCheck(.proposedProtocolParametersUpdates, at: version)
+        return .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: simpleQueryBuf(tag: 4)))
+    }
+
+    /// Query the stake distribution across stake pools.
+    ///
+    /// Wire form at NtCv9..v20: tag 5.  At NtCv21+ the encoder must switch to
+    /// tag 37 (`GetStakeDistribution2`) — handled in a follow-up commit.
+    public static func stakeDistribution(
+        at version: UInt16 = NodeToClientVersion.v16
+    ) throws -> LedgerQuery {
+        try gateCheck(.stakeDistribution, at: version)
+        return .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: simpleQueryBuf(tag: 5)))
     }
 
     /// Query the current constitution hash.
-    public static var constitutionHash: LedgerQuery {
-        .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: simpleQueryBuf(tag: 23)))
+    public static func constitutionHash(
+        at version: UInt16 = NodeToClientVersion.v16
+    ) throws -> LedgerQuery {
+        try gateCheck(.constitutionHash, at: version)
+        return .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: simpleQueryBuf(tag: 23)))
+    }
+
+    /// Query the current Conway governance state.
+    public static func governanceState(
+        at version: UInt16 = NodeToClientVersion.v16
+    ) throws -> LedgerQuery {
+        try gateCheck(.governanceState, at: version)
+        return .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: simpleQueryBuf(tag: 24)))
     }
 
     /// Query the current account state (treasury and reserves).
-    public static var accountState: LedgerQuery {
-        .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: simpleQueryBuf(tag: 29)))
+    public static func accountState(
+        at version: UInt16 = NodeToClientVersion.v16
+    ) throws -> LedgerQuery {
+        try gateCheck(.accountState, at: version)
+        return .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: simpleQueryBuf(tag: 29)))
     }
 
     /// Query the current ratification state (Conway governance).
-    public static var ratifyState: LedgerQuery {
-        .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: simpleQueryBuf(tag: 32)))
+    public static func ratifyState(
+        at version: UInt16 = NodeToClientVersion.v16
+    ) throws -> LedgerQuery {
+        try gateCheck(.ratifyState, at: version)
+        return .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: simpleQueryBuf(tag: 32)))
     }
 
     /// Query the future protocol parameters (post-ratification, pre-epoch-boundary).
-    public static var futurePParams: LedgerQuery {
-        .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: simpleQueryBuf(tag: 33)))
+    public static func futurePParams(
+        at version: UInt16 = NodeToClientVersion.v16
+    ) throws -> LedgerQuery {
+        try gateCheck(.futurePParams, at: version)
+        return .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: simpleQueryBuf(tag: 33)))
     }
 
     /// Query the big ledger peer snapshot for use in peer bootstrapping.
-    public static var bigLedgerPeerSnapshot: LedgerQuery {
-        .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: simpleQueryBuf(tag: 34)))
+    ///
+    /// Wire form at NtCv19..v22: bare `[34]`.  At NtCv23+ the encoder must
+    /// switch to the SRV form `[34, peerKindByte]` — handled in a follow-up
+    /// commit.
+    public static func bigLedgerPeerSnapshot(
+        at version: UInt16 = NodeToClientVersion.v16
+    ) throws -> LedgerQuery {
+        try gateCheck(.bigLedgerPeerSnapshot, at: version)
+        return .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: simpleQueryBuf(tag: 34)))
     }
 
     // MARK: - Parameterised queries
 
     /// Query the UTxO set filtered to the given addresses.
-    ///
-    /// Addresses are encoded as CBOR byte strings inside a Tag-258 set, matching
-    /// the Ouroboros `GetUTxOByAddress` wire format.
-    public static func utxoByAddress(_ addresses: [Address]) -> LedgerQuery {
+    public static func utxoByAddress(
+        _ addresses: [Address], at version: UInt16 = NodeToClientVersion.v16
+    ) -> LedgerQuery {
         var buf = ByteBufferAllocator().buffer(capacity: 32 + addresses.count * 64)
         CBORLite.writeArrayHeader(count: 2, into: &buf)
         CBORLite.writeUInt(6, into: &buf)
@@ -146,10 +191,9 @@ extension LedgerQuery {
     }
 
     /// Query the UTxO set filtered to the given transaction inputs.
-    ///
-    /// Inputs are CBOR-encoded as `[txId, index]` arrays inside a Tag-258 set,
-    /// matching the Ouroboros `GetUTxOByTxIn` wire format.
-    public static func utxoByTxIn(_ inputs: [TransactionInput]) throws -> LedgerQuery {
+    public static func utxoByTxIn(
+        _ inputs: [TransactionInput], at version: UInt16 = NodeToClientVersion.v16
+    ) throws -> LedgerQuery {
         var buf = ByteBufferAllocator().buffer(capacity: 32 + inputs.count * 40)
         CBORLite.writeArrayHeader(count: 2, into: &buf)
         CBORLite.writeUInt(15, into: &buf)
@@ -162,7 +206,9 @@ extension LedgerQuery {
     }
 
     /// Query stake pool parameters for the given pool operators.
-    public static func stakePoolParams(_ pools: [PoolOperator]) throws -> LedgerQuery {
+    public static func stakePoolParams(
+        _ pools: [PoolOperator], at version: UInt16 = NodeToClientVersion.v16
+    ) throws -> LedgerQuery {
         var buf = ByteBufferAllocator().buffer(capacity: 32 + pools.count * 32)
         CBORLite.writeArrayHeader(count: 2, into: &buf)
         CBORLite.writeUInt(17, into: &buf)
@@ -176,7 +222,7 @@ extension LedgerQuery {
 
     /// Query filtered delegations and reward account summaries for the given stake credentials.
     public static func filteredDelegationsAndRewardAccounts(
-        _ credentials: [any Credential]
+        _ credentials: [any Credential], at version: UInt16 = NodeToClientVersion.v16
     ) throws -> LedgerQuery {
         var buf = ByteBufferAllocator().buffer(capacity: 32 + credentials.count * 36)
         CBORLite.writeArrayHeader(count: 2, into: &buf)
@@ -190,11 +236,8 @@ extension LedgerQuery {
     }
 
     /// Query projected non-myopic member rewards for the given inputs.
-    ///
-    /// Each input is either a coin amount (hypothetical stake) or a stake credential
-    /// (existing account). The node returns projected rewards per pool for each input.
     public static func nonMyopicMemberRewards(
-        _ inputs: [NonMyopicMemberRewardsInput]
+        _ inputs: [NonMyopicMemberRewardsInput], at version: UInt16 = NodeToClientVersion.v16
     ) throws -> LedgerQuery {
         var buf = ByteBufferAllocator().buffer(capacity: 32 + inputs.count * 36)
         CBORLite.writeArrayHeader(count: 2, into: &buf)
@@ -213,9 +256,9 @@ extension LedgerQuery {
     }
 
     /// Query stake pool state for the given pools; pass `nil` to query all pools.
-    ///
-    /// `Maybe (Set PoolId)` encodes Nothing as `[]` and Just as `[tag258set]`.
-    public static func poolState(_ pools: [PoolOperator]?) throws -> LedgerQuery {
+    public static func poolState(
+        _ pools: [PoolOperator]?, at version: UInt16 = NodeToClientVersion.v16
+    ) throws -> LedgerQuery {
         if let pools {
             var buf = ByteBufferAllocator().buffer(capacity: 32 + pools.count * 32)
             CBORLite.writeArrayHeader(count: 2, into: &buf)
@@ -233,9 +276,9 @@ extension LedgerQuery {
     }
 
     /// Query stake snapshots (mark/set/go) for a specific pool; pass `nil` for all pools.
-    ///
-    /// `Maybe PoolId` encodes Nothing as `[]` and Just as `[pool_bytes]`.
-    public static func stakeSnapshots(_ pool: PoolOperator?) throws -> LedgerQuery {
+    public static func stakeSnapshots(
+        _ pool: PoolOperator?, at version: UInt16 = NodeToClientVersion.v16
+    ) throws -> LedgerQuery {
         if let pool {
             let poolData = try pool.toCBORData(deterministic: true)
             var buf = ByteBufferAllocator().buffer(capacity: 32 + poolData.count)
@@ -251,8 +294,12 @@ extension LedgerQuery {
 
     /// Query pool stake distribution for the given pools; pass `nil` to query all pools.
     ///
-    /// `Maybe (Set PoolId)` encodes Nothing as `[]` and Just as `[tag258set]`.
-    public static func poolDistr(_ pools: [PoolOperator]?) throws -> LedgerQuery {
+    /// Wire form at NtCv9..v20: tag 21.  At NtCv21+ the encoder must switch to
+    /// tag 36 (`GetPoolDistr2`) — handled in a follow-up commit.
+    public static func poolDistr(
+        _ pools: [PoolOperator]?, at version: UInt16 = NodeToClientVersion.v16
+    ) throws -> LedgerQuery {
+        try gateCheck(.poolDistr, at: version)
         if let pools {
             var buf = ByteBufferAllocator().buffer(capacity: 32 + pools.count * 32)
             CBORLite.writeArrayHeader(count: 2, into: &buf)
@@ -271,7 +318,7 @@ extension LedgerQuery {
 
     /// Query stake delegation deposits for the given stake credentials.
     public static func stakeDelegDeposits(
-        _ credentials: [any Credential]
+        _ credentials: [any Credential], at version: UInt16 = NodeToClientVersion.v16
     ) throws -> LedgerQuery {
         var buf = ByteBufferAllocator().buffer(capacity: 32 + credentials.count * 36)
         CBORLite.writeArrayHeader(count: 2, into: &buf)
@@ -285,7 +332,10 @@ extension LedgerQuery {
     }
 
     /// Query on-chain state for the given DReps.
-    public static func drepState(_ dreps: [DRep]) throws -> LedgerQuery {
+    public static func drepState(
+        _ dreps: [DRep], at version: UInt16 = NodeToClientVersion.v16
+    ) throws -> LedgerQuery {
+        try gateCheck(.drepState, at: version)
         var buf = ByteBufferAllocator().buffer(capacity: 32 + dreps.count * 36)
         CBORLite.writeArrayHeader(count: 2, into: &buf)
         CBORLite.writeUInt(25, into: &buf)
@@ -298,7 +348,10 @@ extension LedgerQuery {
     }
 
     /// Query total delegated stake for the given DReps.
-    public static func drepStakeDistr(_ dreps: [DRep]) throws -> LedgerQuery {
+    public static func drepStakeDistr(
+        _ dreps: [DRep], at version: UInt16 = NodeToClientVersion.v16
+    ) throws -> LedgerQuery {
+        try gateCheck(.drepStakeDistr, at: version)
         var buf = ByteBufferAllocator().buffer(capacity: 32 + dreps.count * 36)
         CBORLite.writeArrayHeader(count: 2, into: &buf)
         CBORLite.writeUInt(26, into: &buf)
@@ -311,12 +364,10 @@ extension LedgerQuery {
     }
 
     /// Query current constitutional committee member states with optional filters.
-    ///
-    /// Empty filter sets (`CommitteeMembersFilter.all`) return all members.
-    /// The query encodes three Tag-258 sets: cold credentials, hot credentials, and statuses.
     public static func committeeMembersState(
-        _ filter: CommitteeMembersFilter
+        _ filter: CommitteeMembersFilter, at version: UInt16 = NodeToClientVersion.v16
     ) throws -> LedgerQuery {
+        try gateCheck(.committeeMembersState, at: version)
         let cold = filter.coldCredentials ?? []
         let hot = filter.hotCredentials ?? []
         var buf = ByteBufferAllocator().buffer(capacity: 64 + (cold.count + hot.count) * 36)
@@ -332,15 +383,15 @@ extension LedgerQuery {
             let data = try cred.toCBORData(deterministic: true)
             buf.writeBytes(data)
         }
-        // Empty status filter set (no status filter applied)
         writeTag258Set(count: 0, into: &buf)
         return .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: buf))
     }
 
     /// Query the DRep each stake credential has delegated their vote to.
     public static func filteredVoteDelegatees(
-        _ credentials: [any Credential]
+        _ credentials: [any Credential], at version: UInt16 = NodeToClientVersion.v16
     ) throws -> LedgerQuery {
+        try gateCheck(.filteredVoteDelegatees, at: version)
         var buf = ByteBufferAllocator().buffer(capacity: 32 + credentials.count * 36)
         CBORLite.writeArrayHeader(count: 2, into: &buf)
         CBORLite.writeUInt(28, into: &buf)
@@ -353,9 +404,10 @@ extension LedgerQuery {
     }
 
     /// Query SPO stake distribution for the given pools; pass `nil` to query all pools.
-    ///
-    /// `Maybe (Set PoolId)` encodes Nothing as `[]` and Just as `[tag258set]`.
-    public static func spoStakeDistr(_ pools: [PoolOperator]?) throws -> LedgerQuery {
+    public static func spoStakeDistr(
+        _ pools: [PoolOperator]?, at version: UInt16 = NodeToClientVersion.v16
+    ) throws -> LedgerQuery {
+        try gateCheck(.spoStakeDistr, at: version)
         if let pools {
             var buf = ByteBufferAllocator().buffer(capacity: 32 + pools.count * 32)
             CBORLite.writeArrayHeader(count: 2, into: &buf)
@@ -373,7 +425,10 @@ extension LedgerQuery {
     }
 
     /// Query the active governance proposals matching the given governance action IDs.
-    public static func proposals(_ govActionIDs: [GovActionID]) throws -> LedgerQuery {
+    public static func proposals(
+        _ govActionIDs: [GovActionID], at version: UInt16 = NodeToClientVersion.v16
+    ) throws -> LedgerQuery {
+        try gateCheck(.proposals, at: version)
         var buf = ByteBufferAllocator().buffer(capacity: 32 + govActionIDs.count * 36)
         CBORLite.writeArrayHeader(count: 2, into: &buf)
         CBORLite.writeUInt(31, into: &buf)
@@ -387,6 +442,20 @@ extension LedgerQuery {
 }
 
 // MARK: - Private helpers
+
+/// Throws `LocalStateQueryError.queryNotSupported` if the query isn't allowed
+/// at the negotiated version.  Skipped when `version == 0` (no handshake
+/// information available — caller is trusted).
+private func gateCheck(_ kind: NtcQueryGate.QueryKind, at version: UInt16) throws {
+    guard version != 0 else { return }
+    guard NtcQueryGate.isSupported(kind, at: version) else {
+        throw LocalStateQueryError.queryNotSupported(
+            name: NtcQueryGate.name(kind),
+            negotiatedVersion: version,
+            requiredVersion: NtcQueryGate.minVersion(for: kind)
+        )
+    }
+}
 
 private func simpleQueryBuf(tag: UInt64) -> ByteBuffer {
     var buf = ByteBufferAllocator().buffer(capacity: 4)
