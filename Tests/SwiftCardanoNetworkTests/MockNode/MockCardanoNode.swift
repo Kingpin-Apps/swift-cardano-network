@@ -36,6 +36,11 @@ struct MockNodeConfig: Sendable {
     /// `false` to skip handshake negotiation entirely — useful for testing
     /// the dummy protocols (§3.5) which do not require a handshake.
     var requireHandshake: Bool = true
+    /// Maximum NtC wire version the mock advertises during handshake. Default
+    /// `NodeToClientVersion.v16` matches the project's previous default; bump
+    /// per-test to negotiate v17+/v22/v23 and exercise version-conditional
+    /// query encoders.  Ignored in NtN mode (`handshakeMode == .nodeToNode`).
+    var maxNtcVersion: UInt16 = NodeToClientVersion.v16
 
     // MARK: ChainSync
     /// Blocks to stream via ChainSync (`rollForward`), in order.
@@ -411,9 +416,30 @@ private struct MockServerRunner: Sendable {
         var payload = sdu.payload
         guard case .proposeVersions(let proposals) = try codec.decode(&payload) else { return }
 
-        // Accept the highest mutually supported version.
-        let supported: Set<UInt16> = [7, 8, 9, 10, 11, 12, 13, 14]
-        let chosen = proposals.keys.filter { supported.contains($0) }.max() ?? 14
+        // Build the supported-version set per handshake mode.  NtN: 7..14
+        // (the legacy library default).  NtC: every version up to and
+        // including `config.maxNtcVersion`.
+        let supported: Set<UInt16>
+        let fallback: UInt16
+        switch config.handshakeMode {
+        case .nodeToNode:
+            supported = [7, 8, 9, 10, 11, 12, 13, 14]
+            fallback = 14
+        case .nodeToClient:
+            // NtC v9 / v14 / v15 are oddly-spaced legacy versions; v16+
+            // are contiguous.  Advertise everything we know up to maxNtcVersion.
+            var ntc: Set<UInt16> = [
+                NodeToClientVersion.v9,
+                NodeToClientVersion.v14,
+                NodeToClientVersion.v15,
+            ]
+            for v in NodeToClientVersion.v16...config.maxNtcVersion {
+                ntc.insert(v)
+            }
+            supported = ntc
+            fallback = config.maxNtcVersion
+        }
+        let chosen = proposals.keys.filter { supported.contains($0) }.max() ?? fallback
 
         let vd: HandshakeVersionData =
             config.handshakeMode == .nodeToNode
