@@ -34,13 +34,25 @@ public struct LocalStateQueryClient: Sendable {
     private let demux: DemuxHandler
     private let logger: Logger
 
+    /// The negotiated NtC wire version this client is operating against.
+    ///
+    /// Set by `NodeToClientConnection` after Handshake completes.  Query
+    /// factories in `LedgerQuery+Typed.swift` consult this (via `NtcQueryGate`)
+    /// to choose the correct CBOR tag for queries whose wire encoding changed
+    /// across NtC versions and to refuse early when a caller asks for a query
+    /// the negotiated version cannot service.  Defaults to `0` for direct
+    /// callers and tests that don't go through `NodeToClientConnection`.
+    public let negotiatedVersion: UInt16
+
     public init(
         channel: Channel,
         demux: DemuxHandler,
+        negotiatedVersion: UInt16 = 0,
         logger: Logger = LoggerFactory.logger(subsystem: "localstatequery")
     ) {
         self.channel = channel
         self.demux = demux
+        self.negotiatedVersion = negotiatedVersion
         self.logger = logger
     }
 

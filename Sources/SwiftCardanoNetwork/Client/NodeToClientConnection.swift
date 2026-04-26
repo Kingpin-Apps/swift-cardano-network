@@ -67,7 +67,8 @@ public struct NodeToClientConnection: Sendable {
         self.negotiatedVersion = negotiatedVersion
         self.chainSync = ChainSyncClient(channel: channel, demux: demux, protocolID: MuxSDU.ProtocolID.ntcChainSync)
         self.txSubmission = LocalTxSubmissionClient(channel: channel, demux: demux)
-        self.stateQuery = LocalStateQueryClient(channel: channel, demux: demux)
+        self.stateQuery = LocalStateQueryClient(
+            channel: channel, demux: demux, negotiatedVersion: negotiatedVersion)
         self.txMonitor = LocalTxMonitorClient(
             channel: channel, demux: demux, negotiatedVersion: negotiatedVersion)
     }
