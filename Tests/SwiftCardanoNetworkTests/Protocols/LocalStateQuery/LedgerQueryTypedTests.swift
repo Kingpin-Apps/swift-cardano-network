@@ -120,6 +120,68 @@ private func rawBytes(_ lq: LedgerQuery) -> [UInt8] {
         }
     }
 
+    // MARK: - New v20+/v21+/v23+ queries
+
+    @Test func maxMajorProtocolVersionCBOR_at_v21() throws {
+        // [38]  →  array(1) uint(38)  →  0x81 0x18 0x26
+        let q = try LedgerQuery.maxMajorProtocolVersion(at: NodeToClientVersion.v21)
+        let bytes = rawBytes(q)
+        #expect(bytes == [0x81, 0x18, 0x26])
+    }
+
+    @Test func maxMajorProtocolVersion_throwsBelowV21() throws {
+        do {
+            _ = try LedgerQuery.maxMajorProtocolVersion(at: NodeToClientVersion.v20)
+            Issue.record("Expected queryNotSupported error")
+        } catch let LocalStateQueryError.queryNotSupported(name, negotiated, required) {
+            #expect(name == "getMaxMajorProtocolVersion")
+            #expect(negotiated == NodeToClientVersion.v20)
+            #expect(required == NodeToClientVersion.v21)
+        }
+    }
+
+    @Test func stakePoolDefaultVote_throwsBelowV20() throws {
+        let pool = try PoolOperator(from: Data(repeating: 0xAA, count: 28))
+        do {
+            _ = try LedgerQuery.stakePoolDefaultVote(pool, at: NodeToClientVersion.v19)
+            Issue.record("Expected queryNotSupported error")
+        } catch let LocalStateQueryError.queryNotSupported(name, negotiated, required) {
+            #expect(name == "stakePoolDefaultVote")
+            #expect(negotiated == NodeToClientVersion.v19)
+            #expect(required == NodeToClientVersion.v20)
+        }
+    }
+
+    @Test func stakePoolDefaultVoteCBOR_at_v20() throws {
+        // Expected outer shape: array(2) uint(35) <pool cbor>
+        let pool = try PoolOperator(from: Data(repeating: 0xAA, count: 28))
+        let q = try LedgerQuery.stakePoolDefaultVote(pool, at: NodeToClientVersion.v20)
+        let bytes = rawBytes(q)
+        #expect(bytes[0] == 0x82)         // array(2)
+        #expect(bytes[1] == 0x18)         // uint long form
+        #expect(bytes[2] == 0x23)         // tag 35
+        #expect(bytes.count > 3)          // pool CBOR appended
+    }
+
+    @Test func drepDelegations_throwsBelowV23() throws {
+        do {
+            _ = try LedgerQuery.drepDelegations([], at: NodeToClientVersion.v22)
+            Issue.record("Expected queryNotSupported error")
+        } catch let LocalStateQueryError.queryNotSupported(name, negotiated, required) {
+            #expect(name == "drepDelegations")
+            #expect(negotiated == NodeToClientVersion.v22)
+            #expect(required == NodeToClientVersion.v23)
+        }
+    }
+
+    @Test func drepDelegationsCBOR_emptySet_at_v23() throws {
+        // Expected: array(2) uint(39) tag(258) array(0)
+        //   = 0x82 0x18 0x27 0xd9 0x01 0x02 0x80
+        let q = try LedgerQuery.drepDelegations([], at: NodeToClientVersion.v23)
+        let bytes = rawBytes(q)
+        #expect(bytes == [0x82, 0x18, 0x27, 0xd9, 0x01, 0x02, 0x80])
+    }
+
     @Test func genesisConfigCBOR() {
         // Expected: CBOR array [11]  →  0x81 0x0B
         let bytes = rawBytes(.genesisConfig())

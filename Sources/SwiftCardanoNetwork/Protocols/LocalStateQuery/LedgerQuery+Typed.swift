@@ -459,6 +459,54 @@ extension LedgerQuery {
         }
         return .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: buf))
     }
+
+    // MARK: - Newer queries (added at NtCv20/v21/v23)
+
+    /// Query the default vote of a stake pool's delegators (added at NtCv20).
+    ///
+    /// Wire form: `[35, <pool key hash CBOR>]`.  Upstream constructor:
+    /// `QueryStakePoolDefaultVote :: KeyHash StakePool -> ...`.
+    public static func stakePoolDefaultVote(
+        _ pool: PoolOperator, at version: UInt16 = NodeToClientVersion.v16
+    ) throws -> LedgerQuery {
+        try gateCheck(.stakePoolDefaultVote, at: version)
+        let poolData = try pool.toCBORData(deterministic: true)
+        var buf = ByteBufferAllocator().buffer(capacity: 8 + poolData.count)
+        CBORLite.writeArrayHeader(count: 2, into: &buf)
+        CBORLite.writeUInt(35, into: &buf)
+        buf.writeBytes(poolData)
+        return .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: buf))
+    }
+
+    /// Query the maximum supported major protocol version (added at NtCv21).
+    ///
+    /// Wire form: `[38]`.  Upstream constructor: `GetMaxMajorProtocolVersion`
+    /// returns `MaxMajorProtVer` (a single UInt8).
+    public static func maxMajorProtocolVersion(
+        at version: UInt16 = NodeToClientVersion.v16
+    ) throws -> LedgerQuery {
+        try gateCheck(.getMaxMajorProtocolVersion, at: version)
+        return .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: simpleQueryBuf(tag: 38)))
+    }
+
+    /// Query the stake credential delegations for the given DReps (added at NtCv23).
+    ///
+    /// Wire form: `[39, tag(258, [<drep cbor>, ...])]`.  Upstream constructor:
+    /// `GetDRepDelegations :: Set DRep -> ... Map DRep (Set Credential)`.
+    public static func drepDelegations(
+        _ dreps: [DRep], at version: UInt16 = NodeToClientVersion.v16
+    ) throws -> LedgerQuery {
+        try gateCheck(.drepDelegations, at: version)
+        var buf = ByteBufferAllocator().buffer(capacity: 32 + dreps.count * 36)
+        CBORLite.writeArrayHeader(count: 2, into: &buf)
+        CBORLite.writeUInt(39, into: &buf)
+        writeTag258Set(count: dreps.count, into: &buf)
+        for drep in dreps {
+            let data = try drep.toCBORData(deterministic: true)
+            buf.writeBytes(data)
+        }
+        return .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: buf))
+    }
 }
 
 // MARK: - Private helpers
