@@ -252,6 +252,40 @@ import NIOCore
         }
         #expect(versions.sorted() == [9, 14, 15, 16])
     }
+
+    /// `cardano-node` enforces canonical CBOR (RFC 8949 §4.2.1) on the
+    /// `proposeVersions` map when it contains more than one supported version,
+    /// silently closing the TCP connection if keys are not in ascending byte
+    /// order.  Regression: encode three keys and assert they appear ascending
+    /// in the wire bytes.
+    @Test func proposeVersionsEmitsCanonicalAscendingMapKeys() throws {
+        let versions: [UInt16: HandshakeVersionData] = [
+            NodeToClientVersion.v22: .nodeToClient(networkMagic: 2),
+            NodeToClientVersion.v21: .nodeToClient(networkMagic: 2),
+            NodeToClientVersion.v16: .nodeToClient(networkMagic: 2),
+        ]
+        var buf = try codec.encode(.proposeVersions(versions), allocator: alloc)
+        let bytes = buf.readBytes(length: buf.readableBytes) ?? []
+
+        // Locate the three 2-byte uint16 keys (each preceded by 0x19) and
+        // assert they're in ascending order.
+        var keys: [UInt16] = []
+        var i = 0
+        while i < bytes.count - 2 {
+            if bytes[i] == 0x19 {
+                let key = (UInt16(bytes[i + 1]) << 8) | UInt16(bytes[i + 2])
+                if key >= 0x8000 { keys.append(key) }
+                i += 3
+            } else {
+                i += 1
+            }
+        }
+        #expect(keys == [
+            NodeToClientVersion.v16,
+            NodeToClientVersion.v21,
+            NodeToClientVersion.v22,
+        ], "proposeVersions map keys must be in ascending CBOR canonical order")
+    }
 }
 
 // MARK: - HandshakeError

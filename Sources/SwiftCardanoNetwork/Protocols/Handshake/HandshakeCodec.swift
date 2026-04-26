@@ -30,10 +30,13 @@ public struct HandshakeCodec: ProtocolCodec, Sendable {
         switch message {
         case .proposeVersions(let versions):
             // [0, {version: versionData, ...}]
+            // CBOR canonical (RFC 8949 §4.2.1) requires map keys in ascending
+            // bytewise order; the cardano-node handshake decoder enforces this
+            // when more than one supported version is proposed.
             writeCBORArrayHeader(count: 2, into: &buf)
             writeCBORUInt(0, into: &buf)
             writeCBORMapHeader(count: versions.count, into: &buf)
-            for (version, vd) in versions.sorted(by: { $0.key > $1.key }) {
+            for (version, vd) in versions.sorted(by: { $0.key < $1.key }) {
                 writeCBORUInt(UInt64(version), into: &buf)
                 writeVersionData(vd, into: &buf)
             }
