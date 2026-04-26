@@ -4,12 +4,20 @@
 // `BlockQuery` requests.  Mirrors `blockQueryIsSupportedOnVersion` from
 // IntersectMBO/ouroboros-consensus.
 //
-// LAST VERIFIED: ouroboros-consensus main @ cardano-node 10.7.0 (2026-04-25)
-//   Sources:
+// LAST VERIFIED: ouroboros-consensus main HEAD (2026-04-25)
+//   Sources fetched directly from raw.githubusercontent.com:
 //     ouroboros-consensus-cardano/src/shelley/Ouroboros/Consensus/Shelley/Ledger/Query.hs
-//       (`blockQueryIsSupportedOnVersion`)
+//       (`blockQueryIsSupportedOnVersion` — every BlockQuery constructor's
+//        ShelleyNodeToClientVersion gate)
 //     ouroboros-consensus-cardano/src/ouroboros-consensus-cardano/Ouroboros/Consensus/Cardano/Node.hs
-//       (`supportedNodeToClientVersions`, NtCv ↔ ShelleyV mapping)
+//       (`supportedNodeToClientVersions` — NtCv16..NtCv23 → CardanoNTCv12..19;
+//        each CardanoNTCvN is built with ShelleyNodeToClientVersion(N-4))
+//
+// Field-tested against cardano-node 10.6.2 (NtCv22) on 2026-04-25.  The 10.6.2
+// node was observed to be lenient about queries the gate predicts as removed
+// (e.g. `GetStakeDistribution` tag 5 still returned a result at NtCv22) — the
+// gate below follows upstream HEAD, which 10.7.0+ is expected to enforce
+// strictly.
 //
 // NtC wire ↔ Shelley ledger NtC version mapping referenced below:
 //   NtCv16 = ShelleyV8     NtCv20 = ShelleyV12
