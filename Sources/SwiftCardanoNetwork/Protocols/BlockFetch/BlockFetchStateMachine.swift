@@ -7,7 +7,7 @@
 ///   │                      │                       │
 ///   └──clientDone──►[Done] └───────────────►[Idle]◄┘
 /// ```
-public enum BlockFetchState: ProtocolState, Sendable {
+public enum BlockFetchState: ProtocolState, Sendable, Equatable {
     /// Waiting for the client to issue a request or signal it is done.
     case idle
     /// Range requested; waiting for the server to respond with `startBatch` or `noBlocks`.

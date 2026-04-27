@@ -107,7 +107,7 @@ public struct HandshakeClient: Sendable {
         return Dictionary(uniqueKeysWithValues: versions.map { v in
             switch mode {
             case .nodeToNode:
-                let peerSharing: UInt8? = v >= NodeToNodeVersion.v11 ? 0 : nil
+                let peerSharing: UInt8? = v >= NodeToNodeVersion.v11 ? config.peerSharing : nil
                 let query: Bool? = v >= NodeToNodeVersion.v13 ? false : nil
                 return (v, HandshakeVersionData.nodeToNode(networkMagic: networkMagic, initiatorOnly: false, peerSharing: peerSharing, query: query))
             case .nodeToClient:

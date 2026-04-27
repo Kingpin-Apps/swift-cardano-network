@@ -16,8 +16,24 @@ public enum CardanoMetrics {
     public static let txSubmissionsTotal       = "cardano_network_tx_submissions_total"
     public static let sduDecodeErrorsTotal     = "cardano_network_sdu_decode_errors_total"
     public static let agencyViolationsTotal    = "cardano_network_agency_violations_total"
+    public static let peerSharingRequestsTotal = "cardano_network_peer_sharing_requests_total"
+    public static let peerSharingPeersReceivedTotal = "cardano_network_peer_sharing_peers_received_total"
+    public static let peerSharingResponderRequestsTotal = "cardano_network_peer_sharing_responder_requests_total"
+
+    // Outbound governor counters
+    public static let governorPeersPromotedTotal      = "cardano_network_governor_peers_promoted_total"
+    public static let governorPeersBannedTotal        = "cardano_network_governor_peers_banned_total"
+    public static let governorPeersDemotedTotal       = "cardano_network_governor_peers_demoted_total"
+    public static let governorConnectionAttemptsTotal = "cardano_network_governor_connection_attempts_total"
 
     // MARK: - Gauges
+
+    public static let governorPeersCold   = "cardano_network_governor_peers_cold"
+    public static let governorPeersWarm   = "cardano_network_governor_peers_warm"
+    public static let governorPeersHot    = "cardano_network_governor_peers_hot"
+    public static let governorPeersBanned = "cardano_network_governor_peers_banned"
+
+    // MARK: - Gauges (existing)
 
     public static let connectionsActive        = "cardano_network_connections_active"
     public static let chainTipSlot             = "cardano_network_chain_tip_slot"
@@ -40,6 +56,8 @@ public enum CardanoMetrics {
         public static let result   = "result"    // "ok", "error", "accepted", "rejected"
         public static let `protocol` = "protocol"  // mini-protocol name
         public static let query    = "query"     // LocalStateQuery query name
+        public static let transition = "transition" // "cold_to_warm", "warm_to_hot", etc.
+        public static let reason   = "reason"    // "violation", "error_threshold", "manual"
     }
 }
 

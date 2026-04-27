@@ -17,7 +17,7 @@
 ///   │
 ///   └──done──►[Done]
 /// ```
-public enum ChainSyncState: ProtocolState, Sendable {
+public enum ChainSyncState: ProtocolState, Sendable, Equatable {
     /// Initial / post-response state. Client sends next.
     case idle
     /// `RequestNext` sent; server may respond immediately or with `AwaitReply`.

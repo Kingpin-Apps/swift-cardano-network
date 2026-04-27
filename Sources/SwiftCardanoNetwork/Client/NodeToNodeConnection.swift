@@ -41,6 +41,11 @@ public struct NodeToNodeConnection: Sendable {
     /// on demand via `reqResp(codec:)`.
     let demux: DemuxHandler
 
+    /// The result of the NtN Handshake, when the connection was negotiated.
+    /// `nil` for `connectToNodeWithoutHandshake` sessions. Used by
+    /// `peerSharing()` to gate availability per §3.11.5.
+    public let negotiatedVersion: NegotiatedVersion?
+
     // MARK: - Mini-protocol clients
 
     /// ChainSync — streams block headers (fetch bodies separately via `blockFetch`).
@@ -70,10 +75,12 @@ public struct NodeToNodeConnection: Sendable {
         channel: Channel,
         demux: DemuxHandler,
         protocolConfig: ProtocolConfig,
+        negotiatedVersion: NegotiatedVersion? = nil,
         startKeepAlive: Bool = true
     ) {
         self.channel = channel
         self.demux = demux
+        self.negotiatedVersion = negotiatedVersion
         self.chainSync = ChainSyncClient(channel: channel, demux: demux)
         self.blockFetch = BlockFetchClient(channel: channel, demux: demux)
         self.txSubmission2 = TxSubmission2Client(channel: channel, demux: demux)
@@ -89,6 +96,35 @@ public struct NodeToNodeConnection: Sendable {
         } else {
             self._keepAliveTask = nil
         }
+    }
+
+    // MARK: - Peer Sharing (§3.11)
+
+    /// Construct a `PeerSharingClient` for this connection.
+    ///
+    /// Per §3.11.5, peer sharing is only available when:
+    /// * the negotiated NtN version is ≥ 14, **and**
+    /// * the remote advertised `peerSharing == 1` (`PeerSharingEnabled`)
+    ///   in its handshake reply.
+    ///
+    /// When either precondition fails this method throws
+    /// `PeerSharingError.unsupported`. It also throws if the connection was
+    /// created via `CardanoNode.connectToNodeWithoutHandshake` (no negotiated
+    /// version is available).
+    ///
+    /// To make outbound peer-sharing requests succeed against a real
+    /// `cardano-node`, set `config.protocol.peerSharing = 1` in the
+    /// `CardanoNetworkConfiguration` before calling `connectToNode` so the
+    /// remote sees the local side advertising willingness.
+    public func peerSharing() throws -> PeerSharingClient {
+        guard let negotiated = negotiatedVersion else {
+            throw PeerSharingError.unsupported(version: 0, peerSharingFlag: nil)
+        }
+        return try PeerSharingClient(
+            channel: channel,
+            demux: demux,
+            negotiatedVersion: negotiated
+        )
     }
 
     // MARK: - Lifecycle

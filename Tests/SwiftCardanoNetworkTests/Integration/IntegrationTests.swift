@@ -451,6 +451,134 @@ struct IntegrationTests {
         }
     }
 
+    // MARK: - PeerSharing (§3.11)
+
+    @Test("PeerSharing: requests peers and receives the configured response")
+    func peerSharingHappyPath() async throws {
+        var config = MockNodeConfig()
+        config.peerSharingFlag = 1   // PeerSharingEnabled
+        config.peerSharingResponse = [
+            .ipv4(addr: 0x7F00_0001, port: 3001),
+            .ipv4(addr: 0xC0A8_0101, port: 3001),
+            .ipv6(addr: (0x2001_0DB8, 0, 0, 1), port: 3001),
+        ]
+
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+        defer { shutdownEventLoopGroup(group) }
+
+        let node = try await MockCardanoNode(config: config, group: group)
+
+        // Build a custom protocol config that opts into peer sharing locally
+        // so that the negotiated NtN version data carries peerSharing == 1.
+        var conn = ConnectionConfig()
+        conn.host = "127.0.0.1"
+        conn.port = node.port
+        var protoCfg = ProtocolConfig()
+        protoCfg.peerSharing = 1   // PeerSharingEnabled
+
+        let (channel, demux) = try await TCPTransport(
+            config: conn,
+            protocolConfig: protoCfg,
+            group: group
+        ).connect()
+
+        let negotiated = try await HandshakeClient(
+            channel: channel,
+            demux: demux,
+            config: protoCfg,
+            mode: .nodeToNode
+        ).negotiate(networkMagic: 764_824_073)
+
+        let client = try PeerSharingClient(
+            channel: channel,
+            demux: demux,
+            negotiatedVersion: negotiated
+        )
+        let peers = try await client.request(amount: 5)
+
+        #expect(peers.count == 3)
+        #expect(peers[0] == .ipv4(addr: 0x7F00_0001, port: 3001))
+        #expect(peers[2] == .ipv6(addr: (0x2001_0DB8, 0, 0, 1), port: 3001))
+
+        try await client.done()
+    }
+
+    @Test("PeerSharing: throws tooManyPeers when server overflows requested amount")
+    func peerSharingTooManyPeers() async throws {
+        var config = MockNodeConfig()
+        config.peerSharingFlag = 1
+        config.peerSharingExceedAmount = true
+        config.peerSharingResponse = [
+            .ipv4(addr: 0x0A00_0001, port: 1),
+            .ipv4(addr: 0x0A00_0002, port: 2),
+            .ipv4(addr: 0x0A00_0003, port: 3),
+        ]
+
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+        defer { shutdownEventLoopGroup(group) }
+
+        let node = try await MockCardanoNode(config: config, group: group)
+
+        var conn = ConnectionConfig()
+        conn.host = "127.0.0.1"
+        conn.port = node.port
+        var protoCfg = ProtocolConfig()
+        protoCfg.peerSharing = 1
+
+        let (channel, demux) = try await TCPTransport(
+            config: conn,
+            protocolConfig: protoCfg,
+            group: group
+        ).connect()
+
+        let negotiated = try await HandshakeClient(
+            channel: channel,
+            demux: demux,
+            config: protoCfg,
+            mode: .nodeToNode
+        ).negotiate(networkMagic: 764_824_073)
+
+        let client = try PeerSharingClient(
+            channel: channel,
+            demux: demux,
+            negotiatedVersion: negotiated
+        )
+
+        await #expect(throws: PeerSharingError.self) {
+            _ = try await client.request(amount: 1)
+        }
+    }
+
+    @Test("PeerSharing: init throws when remote did not advertise peerSharingEnabled")
+    func peerSharingInitRejectsDisabledRemote() async throws {
+        var config = MockNodeConfig()
+        config.peerSharingFlag = 0   // PeerSharingDisabled
+
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+        defer { shutdownEventLoopGroup(group) }
+
+        let node = try await MockCardanoNode(config: config, group: group)
+
+        let (channel, demux) = try await connectAndHandshake(port: node.port, group: group)
+
+        let negotiated = NegotiatedVersion(
+            version: NodeToNodeVersion.v14,
+            versionData: .nodeToNode(
+                networkMagic: 764_824_073,
+                initiatorOnly: false,
+                peerSharing: 0,
+                query: false
+            )
+        )
+        #expect(throws: PeerSharingError.self) {
+            _ = try PeerSharingClient(
+                channel: channel,
+                demux: demux,
+                negotiatedVersion: negotiated
+            )
+        }
+    }
+
     // MARK: - Multi-protocol
 
     @Test("Multi-protocol: handshake + txSubmit + query on same connection")

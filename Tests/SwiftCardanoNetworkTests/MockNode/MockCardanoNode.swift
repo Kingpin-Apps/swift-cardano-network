@@ -88,6 +88,20 @@ struct MockNodeConfig: Sendable {
     /// Optional handler mapping a raw request buffer to a raw response buffer.
     /// If `nil`, the mock echoes the request verbatim.
     var reqRespHandler: (@Sendable (ByteBuffer) -> ByteBuffer)? = nil
+
+    // MARK: PeerSharing (§3.11)
+    /// Peers returned from a `shareRequest`. The mock returns
+    /// `peerSharingResponse.prefix(amount)` unless `peerSharingExceedAmount` is
+    /// set, in which case it returns the full list verbatim regardless of the
+    /// requested amount (used to exercise `tooManyPeers` error handling).
+    var peerSharingResponse: [PeerAddress] = []
+    /// When `true`, ignore the requested amount and return the full
+    /// `peerSharingResponse` list. Used to test client-side overflow handling.
+    var peerSharingExceedAmount: Bool = false
+    /// Value advertised in the NtN handshake `peerSharing` flag. The default
+    /// `0` (PeerSharingDisabled) matches a stock cardano-node before opt-in;
+    /// set to `1` (PeerSharingEnabled) for tests that exercise §3.11.
+    var peerSharingFlag: UInt8 = 0
 }
 
 // MARK: - TxSubmission2MockBehavior
@@ -349,6 +363,7 @@ private struct MockServerRunner: Sendable {
     private let txSubmission2Stream: AsyncStream<MuxSDU>
     private let pingPongStream: AsyncStream<MuxSDU>
     private let reqRespStream: AsyncStream<MuxSDU>
+    private let peerSharingStream: AsyncStream<MuxSDU>
 
     /// Must be called synchronously on the NIO event-loop thread (e.g. from
     /// `channelActive`) so that all registrations complete before any
@@ -369,6 +384,7 @@ private struct MockServerRunner: Sendable {
         self.txSubmission2Stream = demux.register(protocolID: MuxSDU.ProtocolID.txSubmission2)
         self.pingPongStream = demux.register(protocolID: MuxSDU.ProtocolID.pingPong)
         self.reqRespStream = demux.register(protocolID: MuxSDU.ProtocolID.reqResp)
+        self.peerSharingStream = demux.register(protocolID: MuxSDU.ProtocolID.peerSharing)
     }
 
     func run() async throws {
@@ -389,6 +405,7 @@ private struct MockServerRunner: Sendable {
             group.addTask { try? await self.handleTxSubmission2() }
             group.addTask { try? await self.handlePingPong() }
             group.addTask { try? await self.handleReqResp() }
+            group.addTask { try? await self.handlePeerSharing() }
         }
     }
 
@@ -441,12 +458,21 @@ private struct MockServerRunner: Sendable {
         }
         let chosen = proposals.keys.filter { supported.contains($0) }.max() ?? fallback
 
-        let vd: HandshakeVersionData =
-            config.handshakeMode == .nodeToNode
-            ? .nodeToNode(
-                networkMagic: config.networkMagic, initiatorOnly: false, peerSharing: nil,
-                query: nil)
-            : .nodeToClient(networkMagic: config.networkMagic)
+        let vd: HandshakeVersionData
+        switch config.handshakeMode {
+        case .nodeToNode:
+            // Mirror the per-version NtN version-data shape: pre-v11 has only
+            // [magic, initiatorOnly]; v11+ adds the peerSharing flag; v13+
+            // adds the query bool.  The chosen version determines which
+            // tail fields are present.
+            let ps: UInt8? = chosen >= NodeToNodeVersion.v11 ? config.peerSharingFlag : nil
+            let q:  Bool? = chosen >= NodeToNodeVersion.v13 ? false : nil
+            vd = .nodeToNode(
+                networkMagic: config.networkMagic, initiatorOnly: false,
+                peerSharing: ps, query: q)
+        case .nodeToClient:
+            vd = .nodeToClient(networkMagic: config.networkMagic)
+        }
 
         try await send(
             .acceptVersion(chosen, vd), codec: codec, protocolID: MuxSDU.ProtocolID.handshake)
@@ -721,6 +747,37 @@ private struct MockServerRunner: Sendable {
             switch try codec.decode(&payload) {
             case .ping:
                 try await send(.pong, codec: codec, protocolID: MuxSDU.ProtocolID.pingPong)
+
+            case .done:
+                return
+
+            default:
+                break
+            }
+        }
+    }
+
+    // MARK: - PeerSharing (§3.11)
+
+    private func handlePeerSharing() async throws {
+        let codec = PeerSharingCodec()
+        var iter = peerSharingStream.makeAsyncIterator()
+
+        while let sdu = await iter.next() {
+            var payload = sdu.payload
+            switch try codec.decode(&payload) {
+            case .shareRequest(let amount):
+                let peers: [PeerAddress]
+                if config.peerSharingExceedAmount {
+                    peers = config.peerSharingResponse
+                } else {
+                    peers = Array(config.peerSharingResponse.prefix(Int(amount)))
+                }
+                try await send(
+                    .sharePeers(peers),
+                    codec: codec,
+                    protocolID: MuxSDU.ProtocolID.peerSharing
+                )
 
             case .done:
                 return

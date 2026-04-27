@@ -68,11 +68,16 @@ CardanoNode (factory)
 
 ## Topics
 
+### Articles
+
+- <doc:OutboundGovernor>
+
 ### Entry Points
 
 - ``CardanoNode``
 - ``NodeToClientConnection``
 - ``NodeToNodeConnection``
+- ``OutboundGovernor``
 
 ### Configuration
 

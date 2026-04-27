@@ -9,7 +9,7 @@
 ///                     │                               │
 ///                  [Done ✓]                       [Done ✗]
 /// ```
-public enum HandshakeState: ProtocolState, Sendable {
+public enum HandshakeState: ProtocolState, Sendable, Equatable {
     /// Initial state. Client holds agency and must send `ProposeVersions`.
     case start
     /// `ProposeVersions` has been sent. Server holds agency.
