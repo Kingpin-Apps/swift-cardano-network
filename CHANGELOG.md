@@ -1,3 +1,9 @@
+## 1.0.3 (2026-04-27)
+
+### Fix
+
+- add OutboundGovernor and PeerSharing
+
 ## 1.0.2 (2026-04-26)
 
 ### Fix
