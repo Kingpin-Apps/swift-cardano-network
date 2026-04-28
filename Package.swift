@@ -13,7 +13,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.65.0"),
         .package(url: "https://github.com/apple/swift-nio-extras.git", from: "1.22.0"),
-        .package(url: "https://github.com/apple/swift-log.git", from: "1.6.0"),
+        .package(url: "https://github.com/apple/swift-log.git", from: "1.7.0"),
         .package(url: "https://github.com/apple/swift-metrics.git", from: "2.5.0"),
         .package(url: "https://github.com/Kingpin-Apps/swift-cardano-core.git", from: "0.3.15"),
     ],
