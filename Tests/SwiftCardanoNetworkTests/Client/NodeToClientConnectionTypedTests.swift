@@ -210,7 +210,26 @@ struct NodeToClientConnectionTypedTests {
 // MARK: - Live GovernanceState decode test
 
 private func previewSocketReachable(path: String) -> Bool {
-    FileManager.default.fileExists(atPath: path)
+    guard FileManager.default.fileExists(atPath: path) else { return false }
+    // Verify the node is actually running by attempting a brief connection.
+    let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+    guard fd >= 0 else { return false }
+    defer { close(fd) }
+    var addr = sockaddr_un()
+    addr.sun_family = sa_family_t(AF_UNIX)
+    // Phase 1: write path into sun_path (exclusive borrow of addr.sun_path ends here)
+    withUnsafeMutableBytes(of: &addr.sun_path) { buf in
+        path.withCString { cstr in
+            _ = strlcpy(buf.baseAddress!.assumingMemoryBound(to: CChar.self), cstr, buf.count)
+        }
+    }
+    // Phase 2: connect (shared borrow of addr)
+    let result = withUnsafePointer(to: &addr) { ptr in
+        ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockPtr in
+            Darwin.connect(fd, sockPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
+        }
+    }
+    return result == 0
 }
 
 private let previewSocket = "/Users/hadderley/cardano/preview/socket/node.socket"
