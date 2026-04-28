@@ -1,3 +1,10 @@
+## 1.0.4 (2026-04-28)
+
+### Fix
+
+- check for node before running
+- require swift-log >= 1.7.0 for LogEvent, FileLogHandler and SystemLogHandler
+
 ## 1.0.3 (2026-04-27)
 
 ### Fix
