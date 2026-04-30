@@ -4,7 +4,7 @@ A complete Swift async/await client for the Cardano [Ouroboros](https://iohk.io/
 
 ## Overview
 
-SwiftCardanoNetwork implements the full Ouroboros mini-protocol suite over a multiplexed TCP or Unix domain socket connection. All mini-protocols expose a **typed API** backed by [SwiftCardanoCore](https://github.com/Kingpin-Apps/swift-cardano-core) that works with fully-decoded `Block`, `Transaction`, `UTxO`, and `ProtocolParameters` values — no manual CBOR handling required.
+SwiftCardanoNetwork implements the full Ouroboros mini-protocol suite over a multiplexed TCP or Unix domain socket connection. All mini-protocols expose a **typed API** backed by [SwiftCardanoCore](https://github.com/Kingpin-Apps/swift-cardano-core) that works with fully-decoded `EraBlock`, `Transaction`, `UTxO`, and `ProtocolParameters` values — no manual CBOR handling required.
 
 Two transport modes are available:
 
@@ -21,9 +21,10 @@ var config = CardanoNetworkConfiguration.mainnet
 config.connection.socketPath = "/ipc/node.socket"
 
 try await CardanoNode.withClient(config: config) { connection in
-    for try await event in connection.follow(from: []) {
-        if case .rollForward(let block, let tip) = event {
-            print("Block txs=\(block.transactionBodies.count) tip=\(tip.blockNo)")
+    for try await event in connection.follow() {
+        if case .rollForward(let eraBlock, let tip) = event {
+            // eraBlock is EraBlock — switch on era for full type access
+            print("Tip: \(tip.blockNo)")
         }
     }
 }
@@ -49,15 +50,20 @@ try await CardanoNode.withClient(config: config) { connection in
 ```
 CardanoNode (factory)
 ├── connectToClient()  →  NodeToClientConnection
-│       ├── chainSync       (ChainSyncClient — full blocks)
+│       ├── chainSync       (ChainSyncClient — full EraBlocks)
 │       ├── txSubmission    (LocalTxSubmissionClient)
 │       ├── stateQuery      (LocalStateQueryClient)
 │       └── txMonitor       (LocalTxMonitorClient)
 │
 └── connectToNode()    →  NodeToNodeConnection
-        ├── chainSync       (ChainSyncClient — headers)
+        ├── chainSync       (ChainSyncClient — EraBlockHeaders)
         ├── blockFetch      (BlockFetchClient)
-        └── txSubmission2   (TxSubmission2Client)
+        ├── txSubmission2   (TxSubmission2Client)
+        └── peerSharing     (PeerSharingClient)
+
+OutboundGovernor (multi-peer, NtN)
+└── visitors: HandshakeBehavior, KeepAliveBehavior, DiscoveryBehavior,
+              PromotionBehavior, ConnectionBehavior, PeerSharingResponderBehavior
 ```
 
 **Transport layer** — `UnixSocketTransport` and `TCPTransport` wrap SwiftNIO channels.
@@ -65,6 +71,8 @@ CardanoNode (factory)
 **Mux layer** — `MuxFrameDecoder` and `MuxFrameEncoder` implement the Ouroboros SDU framing. ``DemuxHandler`` routes inbound frames to the correct mini-protocol stream by protocol ID.
 
 **Protocol Driver** — ``ProtocolDriver`` wraps a channel and an agency-based state machine, enforcing the send/receive rules of each mini-protocol.
+
+**Governor** — ``OutboundGovernor`` manages many NtN peers concurrently, handling Cold→Warm→Hot promotion, peer-sharing-driven discovery, and reputation-based banning. Use it when you need multi-peer policy; use ``CardanoNode`` for single-connection workloads.
 
 ## Topics
 
@@ -91,6 +99,8 @@ CardanoNode (factory)
 
 - ``ChainSyncClient``
 - ``ChainEvent``
+- ``EraBlockEvent``
+- ``EraHeaderEvent``
 - ``ChainSyncError``
 
 ### Block Download
@@ -102,6 +112,7 @@ CardanoNode (factory)
 
 - ``LocalTxSubmissionClient``
 - ``LocalTxSubmissionError``
+- ``TypedSubmissionError``
 - ``RawTransaction``
 - ``TxRejection``
 
@@ -122,11 +133,18 @@ CardanoNode (factory)
 - ``LocalTxMonitorError``
 - ``MempoolTx``
 - ``MempoolCapacity``
+- ``MempoolSnapshot``
+- ``MempoolMeasures``
 
 ### Node-to-Node Transaction Propagation
 
 - ``TxSubmission2Client``
 - ``TxSubmissionProvider``
+
+### Peer Sharing
+
+- ``PeerSharingClient``
+- ``PeerSharingError``
 
 ### Version Negotiation
 
