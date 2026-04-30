@@ -1,3 +1,9 @@
+## 1.0.6 (2026-04-30)
+
+### Fix
+
+- update documentation to reflect changes in EraBlock and EraHeader usage
+
 ## 1.0.5 (2026-04-30)
 
 ### Fix
