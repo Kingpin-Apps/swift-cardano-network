@@ -1,16 +1,42 @@
 import Foundation
+import OrderedCollections
 import SwiftCardanoCore
 
 /// A single entry mapping a stake pool operator to its total stake.
-public struct SPOStakeEntry: Sendable, Equatable, Hashable {
-    /// 28-byte pool key hash.
-    public let poolKeyHash: Data
+public struct SPOStakeEntry: Serializable {
+    /// Stake-pool operator (bech32 `pool…` ID; underlying 28-byte key hash).
+    public let poolOperator: PoolOperator
     /// Total stake delegated to this pool, in lovelace.
     public let stake: UInt64
 
-    public init(poolKeyHash: Data, stake: UInt64) {
-        self.poolKeyHash = poolKeyHash
+    public init(poolOperator: PoolOperator, stake: UInt64) {
+        self.poolOperator = poolOperator
         self.stake = stake
+    }
+
+    public init(from primitive: Primitive) throws {
+        guard case .list(let f) = primitive, f.count >= 2 else {
+            throw LedgerStateDecodingError.unexpectedFormat(
+                "SPOStakeEntry: expected [poolOperator, stake]")
+        }
+        poolOperator = try PoolOperator(from: f[0])
+        switch f[1] {
+        case .uint(let v):              stake = UInt64(v)
+        case .int(let v) where v >= 0:  stake = UInt64(v)
+        default:
+            throw LedgerStateDecodingError.unexpectedFormat("SPOStakeEntry: expected uint stake")
+        }
+    }
+
+    public func toPrimitive() throws -> Primitive {
+        .list([try poolOperator.toPrimitive(), .uint(UInt(stake))])
+    }
+
+    public func toDict() throws -> Primitive {
+        var dict = OrderedDictionary<Primitive, Primitive>()
+        dict[.string("poolOperator")] = try poolOperator.toDict()
+        dict[.string("stake")]        = .uint(UInt(stake))
+        return .orderedDict(dict)
     }
 }
 
@@ -18,7 +44,7 @@ public struct SPOStakeEntry: Sendable, Equatable, Hashable {
 ///
 /// Returned by `GetSPOStakeDistr` (query tag 30).
 /// Wire format: `{ pool_key_hash: bytes28 → coin }`
-public struct SPOStakeDistribution: CBORSerializable, Sendable {
+public struct SPOStakeDistribution: Serializable {
     public let entries: [SPOStakeEntry]
 
     public init(entries: [SPOStakeEntry]) {
@@ -34,16 +60,16 @@ public struct SPOStakeDistribution: CBORSerializable, Sendable {
             throw LedgerStateDecodingError.unexpectedFormat("SPOStakeDistribution: expected map")
         }
         entries = try pairs.map { (key, value) in
-            let poolKeyHash = try Self.bytes(from: key)
+            let poolOperator = try PoolOperator(from: key)
             let stake = try Self.uint(from: value)
-            return SPOStakeEntry(poolKeyHash: poolKeyHash, stake: stake)
+            return SPOStakeEntry(poolOperator: poolOperator, stake: stake)
         }
     }
 
     public func toPrimitive() throws -> Primitive {
         var pairs: [(Primitive, Primitive)] = []
         for entry in entries {
-            pairs.append((.bytes(entry.poolKeyHash), .uint(UInt(entry.stake))))
+            pairs.append((try entry.poolOperator.toPrimitive(), .uint(UInt(entry.stake))))
         }
         return .frozenDict(Dictionary(uniqueKeysWithValues: pairs))
     }
@@ -54,15 +80,6 @@ public struct SPOStakeDistribution: CBORSerializable, Sendable {
 
     public static func == (lhs: SPOStakeDistribution, rhs: SPOStakeDistribution) -> Bool {
         lhs.entries == rhs.entries
-    }
-
-    private static func bytes(from p: Primitive) throws -> Data {
-        switch p {
-        case .bytes(let d): return d
-        case .byteArray(let b): return Data(b)
-        default:
-            throw LedgerStateDecodingError.unexpectedFormat("SPOStakeDistribution: expected bytes for pool key hash")
-        }
     }
 
     private static func uint(from p: Primitive) throws -> UInt64 {

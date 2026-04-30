@@ -329,6 +329,114 @@ struct LocalStateQueryClientTypedTests {
         try? await channel.close()
         try? await node.stop()
     }
+
+    // MARK: - queryCurrentEpochState
+
+    @Test("queryCurrentEpochState: unwraps GetCBOR byte string and decodes AccountState")
+    func queryCurrentEpochState() async throws {
+        // Inner payload (22 bytes): array(4) [accountState, ledgerState, snapshots, nonMyopic]
+        //   accountState = array(2) uint(100) uint(200)  → 0x82 0x18 0x64 0x18 0xC8
+        //   ledgerState  = array(2) [utxoState(5), certState(0)]
+        //                  utxoState = array(5) [map(0), 0, 0, array(0), array(0)]
+        //                  → 0x82 0x85 0xA0 0x00 0x00 0x80 0x80 0x80
+        //   snapshots    = array(4) [array(0), array(0), array(0), uint(0)]
+        //                  → 0x84 0x80 0x80 0x80 0x00
+        //   nonMyopic    = array(2) [map(0), uint(0)]  → 0x82 0xA0 0x00
+        // 22 bytes → bstr(22) = 0x56
+        let bytes: [UInt8] = [
+            0x56,                                               // bstr(22)
+            0x84,                                               // array(4)
+            0x82, 0x18, 0x64, 0x18, 0xC8,                      // accountState [100, 200]
+            0x82, 0x85, 0xA0, 0x00, 0x00, 0x80, 0x80, 0x80,    // ledgerState
+            0x84, 0x80, 0x80, 0x80, 0x00,                      // snapshots
+            0x82, 0xA0, 0x00,                                  // nonMyopic
+        ]
+
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+        defer { shutdownEventLoopGroup(group) }
+        let node = try await makeNode(resultBytes: bytes, group: group)
+        let (channel, client) = try await makeClient(port: node.port, group: group)
+
+        let state = try await client.queryCurrentEpochState()
+        #expect(state.accountState.treasury == 100)
+        #expect(state.accountState.reserves == 200)
+
+        try? await channel.close()
+        try? await node.stop()
+    }
+
+    // MARK: - queryDebugLedgerState
+
+    @Test("queryDebugLedgerState: decodes epoch number and embeds epoch state")
+    func queryDebugLedgerState() async throws {
+        // Inner payload (26 bytes): array(6) [uint(10), map(0), map(0), epochState, array(0), map(0)]
+        //   epochState = array(4) [accountState, ledgerState, snapshots, nonMyopic]
+        //     accountState = array(2) uint(1) uint(2)         → 0x82 0x01 0x02
+        //     ledgerState  = array(2) [utxoState(5), certState(0)]
+        //                    utxoState = [map(0), 0, 0, array(0), array(0)]
+        //                    → 0x82 0x85 0xA0 0x00 0x00 0x80 0x80 0x80
+        //     snapshots    = array(4) [array(0), array(0), array(0), uint(0)]
+        //                    → 0x84 0x80 0x80 0x80 0x00
+        //     nonMyopic    = array(2) [map(0), uint(0)]       → 0x82 0xA0 0x00
+        // 26 bytes → bstr(26) = 0x58 0x1A
+        let bytes: [UInt8] = [
+            0x58, 0x1A,                                             // bstr(26)
+            0x86,                                                   // array(6)
+            0x0A,                                                   // uint(10)   — epochNo
+            0xA0, 0xA0,                                             // map(0) × 2 — blocksMade
+            0x84,                                                   // array(4)   — epochState
+            0x82, 0x01, 0x02,                                       //   accountState [1, 2]
+            0x82, 0x85, 0xA0, 0x00, 0x00, 0x80, 0x80, 0x80,        //   ledgerState
+            0x84, 0x80, 0x80, 0x80, 0x00,                          //   snapshots
+            0x82, 0xA0, 0x00,                                       //   nonMyopic
+            0x80,                                                   // array(0)   — rawPulsingRewUpdate
+            0xA0,                                                   // map(0)     — poolDistribution
+        ]
+
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+        defer { shutdownEventLoopGroup(group) }
+        let node = try await makeNode(resultBytes: bytes, group: group)
+        let (channel, client) = try await makeClient(port: node.port, group: group)
+
+        let state = try await client.queryDebugLedgerState()
+        #expect(state.epochNo == 10)
+        #expect(state.epochState.accountState.treasury == 1)
+        #expect(state.epochState.accountState.reserves == 2)
+
+        try? await channel.close()
+        try? await node.stop()
+    }
+
+    // MARK: - queryProtocolState
+
+    @Test("queryProtocolState: decodes operationalCertCounters map")
+    func queryProtocolState() async throws {
+        // Inner payload: PraosState array(7) with one OCert counter entry
+        // lastSlot = Origin [], 5 empty nonce arrays, map(1) { bstr(28 × 0xAB) → uint(3) }
+        // 39 bytes total; wrapped in bstr(39) = 0x58 0x27
+        var bytes: [UInt8] = [
+            0x58, 0x27,                         // bstr(39)
+            0x87,                               // array(7)
+            0x80, 0x80, 0x80, 0x80, 0x80, 0x80, // Origin + 5 nonce fields
+            0xA1,                               // map(1) — ocertCounters
+            0x58, 0x1C,                         // bstr(28) — pool issuer key hash
+        ]
+        bytes += [UInt8](repeating: 0xAB, count: 28)
+        bytes += [0x03]                         // uint(3) — counter value
+
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+        defer { shutdownEventLoopGroup(group) }
+        let node = try await makeNode(resultBytes: bytes, group: group)
+        let (channel, client) = try await makeClient(port: node.port, group: group)
+
+        let state: ChainDepState = try await client.queryProtocolState()
+        let expectedKey = Data(repeating: 0xAB, count: 28)
+        #expect(state.operationalCertCounters[expectedKey] == 3)
+        #expect(state.operationalCertCounters.count == 1)
+
+        try? await channel.close()
+        try? await node.stop()
+    }
 }
 
 // LocalStateQueryClientProtocolParamsTests is kept outside .serialized suite to avoid

@@ -1,32 +1,87 @@
 import Foundation
+import OrderedCollections
 import SwiftCardanoCore
 
 /// A single pool's entry in the stake distribution.
-public struct PoolDistrEntry: Sendable, Equatable, Hashable {
-    /// 28-byte pool key hash.
-    public let poolKeyHash: Data
+public struct PoolDistrEntry: Serializable {
+    /// Stake-pool operator (bech32 `pool…` ID; underlying 28-byte key hash).
+    public let poolOperator: PoolOperator
     /// Rational numerator of the pool's stake fraction (CBOR tag-30).
     public let stakeNumerator: Int
     /// Rational denominator of the pool's stake fraction (CBOR tag-30).
     public let stakeDenominator: Int
     /// 32-byte VRF verification key hash.
-    public let vrfKeyHash: Data
+    public let vrfKeyHash: VrfKeyHash
     /// Absolute stake (Lovelace) — populated only for `GetPoolDistr2`
     /// (NtCv21+) responses; nil for the legacy `GetPoolDistr` (pre-v21) path.
     public let absoluteStake: UInt64?
 
     public init(
-        poolKeyHash: Data,
+        poolOperator: PoolOperator,
         stakeNumerator: Int,
         stakeDenominator: Int,
-        vrfKeyHash: Data,
+        vrfKeyHash: VrfKeyHash,
         absoluteStake: UInt64? = nil
     ) {
-        self.poolKeyHash = poolKeyHash
+        self.poolOperator = poolOperator
         self.stakeNumerator = stakeNumerator
         self.stakeDenominator = stakeDenominator
         self.vrfKeyHash = vrfKeyHash
         self.absoluteStake = absoluteStake
+    }
+
+    public init(from primitive: Primitive) throws {
+        // Wire shape: [stakeFraction, vrfKeyHash] or [stakeFraction, absoluteStake, vrfKeyHash]
+        // paired with a poolKeyHash key in the enclosing map. PoolDistrEntry on its
+        // own can't be reconstructed without that key; this initializer expects the
+        // structured form produced by `toPrimitive()` below.
+        guard case .list(let f) = primitive, f.count >= 3 else {
+            throw LedgerStateDecodingError.unexpectedFormat(
+                "PoolDistrEntry: expected [poolKeyHash, stakeFraction, vrfKeyHash, absoluteStake?]")
+        }
+        poolOperator = try PoolOperator(from: f[0])
+        let (num, denom) = try PoolDistr.rationalPair(from: f[1])
+        stakeNumerator = num
+        stakeDenominator = denom
+        vrfKeyHash = try VrfKeyHash(from: f[2])
+        if f.count >= 4 {
+            switch f[3] {
+            case .uint(let u):             absoluteStake = UInt64(u)
+            case .int(let i) where i >= 0: absoluteStake = UInt64(i)
+            default:                       absoluteStake = nil
+            }
+        } else {
+            absoluteStake = nil
+        }
+    }
+
+    public func toPrimitive() throws -> Primitive {
+        let rational = Primitive.cborTag(
+            CBORTag(
+                tag: 30,
+                value: .list([.int(stakeNumerator), .int(stakeDenominator)])
+            )
+        )
+        var out: [Primitive] = [
+            try poolOperator.toPrimitive(),
+            rational,
+            vrfKeyHash.toPrimitive(),
+        ]
+        if let abs = absoluteStake { out.append(.uint(UInt(abs))) }
+        return .list(out)
+    }
+
+    /// Labeled JSON: bech32 pool ID, rational fields, hex VRF, optional stake.
+    public func toDict() throws -> Primitive {
+        var dict = OrderedDictionary<Primitive, Primitive>()
+        dict[.string("poolOperator")]     = try poolOperator.toDict()
+        dict[.string("stakeNumerator")]   = .int(stakeNumerator)
+        dict[.string("stakeDenominator")] = .int(stakeDenominator)
+        dict[.string("vrfKeyHash")]       = try vrfKeyHash.toDict()
+        if let abs = absoluteStake {
+            dict[.string("absoluteStake")] = .uint(UInt(abs))
+        }
+        return .orderedDict(dict)
     }
 }
 
@@ -45,7 +100,7 @@ public struct PoolDistrEntry: Sendable, Equatable, Hashable {
 /// Each pool entry's value gained an absolute-stake field at v2 and the
 /// outer adds a `totalStake` (sum of every pool's absolute stake).  Both
 /// fields are exposed on this struct; for v1 they're nil/0.
-public struct PoolDistr: CBORSerializable, Sendable {
+public struct PoolDistr: Serializable {
     public let entries: [PoolDistrEntry]
     /// Total active stake across all pools (v2 responses only); nil for v1.
     public let totalStake: UInt64?
@@ -83,11 +138,11 @@ public struct PoolDistr: CBORSerializable, Sendable {
         }
         totalStake = total
         entries = try pairs.map { (key, value) in
-            let poolKeyHash = try Self.bytes(from: key, context: "pool key hash")
+            let poolOperator = try PoolOperator(from: key)
             guard case .list(let elems) = value, elems.count >= 2 else {
                 throw LedgerStateDecodingError.unexpectedFormat("PoolDistr: expected list value")
             }
-            let (num, denom) = try Self.rational(from: elems[0])
+            let (num, denom) = try Self.rationalPair(from: elems[0])
             // v2 has 3 elements: [unitInterval, absoluteStake: uint, vrf_hash]
             // v1 has 2 elements: [unitInterval-or-tag-30,                vrf_hash]
             let absoluteStake: UInt64?
@@ -103,9 +158,9 @@ public struct PoolDistr: CBORSerializable, Sendable {
                 absoluteStake = nil
                 vrfPrimitive = elems[1]
             }
-            let vrfKeyHash = try Self.bytes(from: vrfPrimitive, context: "VRF key hash")
+            let vrfKeyHash = try VrfKeyHash(from: vrfPrimitive)
             return PoolDistrEntry(
-                poolKeyHash: poolKeyHash,
+                poolOperator: poolOperator,
                 stakeNumerator: num,
                 stakeDenominator: denom,
                 vrfKeyHash: vrfKeyHash,
@@ -115,21 +170,30 @@ public struct PoolDistr: CBORSerializable, Sendable {
     }
 
     public func toPrimitive() throws -> Primitive {
-        // Always emit the v1 shape — this library doesn't currently produce
-        // pool-distr responses for node-side use.
         var dict: [(Primitive, Primitive)] = []
         for entry in entries {
-            let key = Primitive.bytes(entry.poolKeyHash)
+            let key = try entry.poolOperator.toPrimitive()
             let rational = Primitive.cborTag(
                 CBORTag(
                     tag: 30,
                     value: .list([.int(entry.stakeNumerator), .int(entry.stakeDenominator)])
                 )
             )
-            let value = Primitive.list([rational, .bytes(entry.vrfKeyHash)])
+            let value: Primitive
+            if let absStake = entry.absoluteStake {
+                // v2: [rational, absolute_stake, vrf_key_hash]
+                value = .list([rational, .uint(UInt(absStake)), entry.vrfKeyHash.toPrimitive()])
+            } else {
+                // v1: [rational, vrf_key_hash]
+                value = .list([rational, entry.vrfKeyHash.toPrimitive()])
+            }
             dict.append((key, value))
         }
-        return .frozenDict(Dictionary(uniqueKeysWithValues: dict))
+        let map = Primitive.frozenDict(Dictionary(uniqueKeysWithValues: dict))
+        if let total = totalStake {
+            return .list([map, .uint(UInt(total))])
+        }
+        return map
     }
 
     public func hash(into hasher: inout Hasher) {
@@ -140,16 +204,7 @@ public struct PoolDistr: CBORSerializable, Sendable {
         lhs.entries == rhs.entries
     }
 
-    private static func bytes(from p: Primitive, context: String) throws -> Data {
-        switch p {
-        case .bytes(let d): return d
-        case .byteArray(let b): return Data(b)
-        default:
-            throw LedgerStateDecodingError.unexpectedFormat("PoolDistr: expected bytes for \(context)")
-        }
-    }
-
-    private static func rational(from p: Primitive) throws -> (Int, Int) {
+    static func rationalPair(from p: Primitive) throws -> (Int, Int) {
         // swift-cardano-core decodes CBOR tag-30 (rational) as Primitive.unitInterval
         if case .unitInterval(let ui) = p {
             return (Int(ui.numerator), Int(ui.denominator))
@@ -167,7 +222,7 @@ public struct PoolDistr: CBORSerializable, Sendable {
         throw LedgerStateDecodingError.unexpectedFormat("PoolDistr: unexpected rational primitive: \(p)")
     }
 
-    private static func intValue(_ p: Primitive) throws -> Int {
+    static func intValue(_ p: Primitive) throws -> Int {
         switch p {
         case .int(let v): return v
         case .uint(let v): return Int(v)

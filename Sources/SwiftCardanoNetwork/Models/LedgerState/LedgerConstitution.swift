@@ -5,7 +5,7 @@ import SwiftCardanoCore
 ///
 /// Returned by `GetConstitution` (query tag 23).
 /// Wire format: `[anchor, script_hash | null]` where `anchor` is `[url, anchor_data_hash]`.
-public struct LedgerConstitution: CBORSerializable, Sendable, Equatable, Hashable {
+public struct LedgerConstitution: Serializable {
     /// The anchor with the URL and data hash of the constitution document.
     public let anchor: LedgerAnchor
     /// Optional script hash governing the constitution guard script.

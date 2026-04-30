@@ -8,11 +8,16 @@ import SwiftCardanoCore
 /// Wire: list[2]:
 ///   [0] orderedDict{ CommitteeColdCredential → expiryEpoch:uint }
 ///   [1] threshold: UnitInterval (CBOR tag-30 rational)
-public struct EnactCommittee: CBORSerializable, Sendable {
+public struct EnactCommittee: Serializable {
     /// Committee members mapped to their term-expiry epoch.
-    public let members: [(coldCred: CommitteeColdCredential, expiryEpoch: UInt64)]
+    public let members: [CommitteeMemberEntry]
     /// Quorum threshold required for committee votes to count.
     public let threshold: UnitInterval
+
+    public init(members: [CommitteeMemberEntry], threshold: UnitInterval) {
+        self.members = members
+        self.threshold = threshold
+    }
 
     public init(from primitive: Primitive) throws {
         guard case .list(let f) = primitive, f.count >= 2 else {
@@ -30,7 +35,7 @@ public struct EnactCommittee: CBORSerializable, Sendable {
                 throw LedgerStateDecodingError.unexpectedFormat(
                     "EnactCommittee: expected uint expiry, got \(v)")
             }
-            return (cred, epoch)
+            return CommitteeMemberEntry(coldCred: cred, expiryEpoch: epoch)
         }
         threshold = try UnitInterval(from: f[1])
     }
@@ -87,7 +92,37 @@ extension EnactCommittee {
 ///   [4] treasury         — uint (Coin in lovelace)
 ///   [5] withdrawals      — map of StakeCredential → Coin (usually empty)
 ///   [6] prevGovActionIds — list[4] of StrictMaybe(GovActionID)
-public struct EnactState: CBORSerializable, Sendable {
+/// A pending treasury withdrawal: where the funds are sent and how much.
+public struct TreasuryWithdrawal: Serializable {
+    public let credential: StakeCredential
+    public let coin: UInt64
+
+    public init(credential: StakeCredential, coin: UInt64) {
+        self.credential = credential
+        self.coin = coin
+    }
+
+    public init(from primitive: Primitive) throws {
+        guard case .list(let f) = primitive, f.count >= 2 else {
+            throw LedgerStateDecodingError.unexpectedFormat(
+                "TreasuryWithdrawal: expected [credential, coin]")
+        }
+        credential = try StakeCredential(from: f[0])
+        switch f[1] {
+        case .uint(let u):              coin = UInt64(u)
+        case .int(let i) where i >= 0:  coin = UInt64(i)
+        default:
+            throw LedgerStateDecodingError.unexpectedFormat(
+                "TreasuryWithdrawal: expected uint coin")
+        }
+    }
+
+    public func toPrimitive() throws -> Primitive {
+        .list([try credential.toPrimitive(), .uint(UInt(coin))])
+    }
+}
+
+public struct EnactState: Serializable {
     /// Constitutional committee membership and quorum threshold (nil if no committee).
     public let committee: EnactCommittee?
     /// The current ratified constitution.
@@ -99,7 +134,7 @@ public struct EnactState: CBORSerializable, Sendable {
     /// Treasury balance in lovelace.
     public let treasury: UInt64
     /// Pending treasury withdrawals authorised but not yet disbursed (usually empty).
-    public let withdrawals: [(credential: StakeCredential, coin: UInt64)]
+    public let withdrawals: [TreasuryWithdrawal]
     /// Most recently enacted GovActionID per governance action type.
     public let prevGovActionIds: PrevGovActionIds
 
@@ -143,7 +178,7 @@ public struct EnactState: CBORSerializable, Sendable {
         }
     }
 
-    private static func parseWithdrawals(_ p: Primitive) throws -> [(credential: StakeCredential, coin: UInt64)] {
+    private static func parseWithdrawals(_ p: Primitive) throws -> [TreasuryWithdrawal] {
         let pairs: [(Primitive, Primitive)]
         switch p {
         case .orderedDict(let d): pairs = d.map { ($0.key, $0.value) }
@@ -155,7 +190,7 @@ public struct EnactState: CBORSerializable, Sendable {
         return try pairs.map { (k, v) in
             let credential = try StakeCredential(from: k)
             let coin = try readUInt(v, label: "withdrawal coin")
-            return (credential, coin)
+            return TreasuryWithdrawal(credential: credential, coin: coin)
         }
     }
 
@@ -179,7 +214,7 @@ public struct EnactState: CBORSerializable, Sendable {
 ///   [1] enacted    — list of full GovActionState (proposals ratified this epoch)
 ///   [2] expired    — CBOR tag-258 set of GovActionID (expired without ratification)
 ///   [3] delayed    — bool (true if HardFork ratification is pending node upgrades)
-public struct RatifyState: CBORSerializable, Sendable {
+public struct RatifyState: Serializable {
     /// The enacted governance state at the current epoch boundary.
     public let enactState: EnactState
     /// Governance proposals that were ratified and enacted this epoch.

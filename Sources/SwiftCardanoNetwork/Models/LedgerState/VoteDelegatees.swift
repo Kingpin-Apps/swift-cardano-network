@@ -32,7 +32,7 @@ extension VoteDelegateeEntry: Hashable {
 ///
 /// Returned by `GetFilteredVoteDelegatees` (query tag 28).
 /// Wire format: `{ stake_credential → drep }`
-public struct VoteDelegatees: CBORSerializable, Sendable {
+public struct VoteDelegatees: Serializable {
     public let entries: [VoteDelegateeEntry]
 
     public init(entries: [VoteDelegateeEntry]) {

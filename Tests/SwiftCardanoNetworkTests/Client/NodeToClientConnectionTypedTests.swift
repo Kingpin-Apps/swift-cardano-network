@@ -343,8 +343,8 @@ struct PoolDistrLiveTests {
         // We expect at least one pool on a healthy preview node.
         #expect(dist.entries.isEmpty == false)
         for entry in dist.entries.prefix(5) {
-            #expect(entry.poolKeyHash.count == 28)
-            #expect(entry.vrfKeyHash.count == 32)
+            #expect(entry.poolOperator.poolKeyHash.payload.count == 28)
+            #expect(entry.vrfKeyHash.payload.count == 32)
             #expect(entry.stakeDenominator > 0)
             // v2 (NtCv21+) responses populate absoluteStake; if the node
             // negotiates v21+ we should see real values.

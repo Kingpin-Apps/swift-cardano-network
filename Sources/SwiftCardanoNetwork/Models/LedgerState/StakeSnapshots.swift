@@ -1,10 +1,11 @@
 import Foundation
+import OrderedCollections
 import SwiftCardanoCore
 
 /// Stake snapshot for a single pool at a single ledger snapshot boundary.
-public struct PoolStakeSnapshotEntry: Sendable, Equatable, Hashable {
-    /// 28-byte pool key hash.
-    public let poolKeyHash: Data
+public struct PoolStakeSnapshotEntry: Serializable {
+    /// Stake-pool operator (bech32 `pool…` ID; underlying 28-byte key hash).
+    public let poolOperator: PoolOperator
     /// Stake at the mark snapshot boundary.
     public let stakeMark: UInt64
     /// Stake at the set snapshot boundary.
@@ -12,11 +13,49 @@ public struct PoolStakeSnapshotEntry: Sendable, Equatable, Hashable {
     /// Stake at the go snapshot boundary.
     public let stakeGo: UInt64
 
-    public init(poolKeyHash: Data, stakeMark: UInt64, stakeSet: UInt64, stakeGo: UInt64) {
-        self.poolKeyHash = poolKeyHash
+    public init(poolOperator: PoolOperator, stakeMark: UInt64, stakeSet: UInt64, stakeGo: UInt64) {
+        self.poolOperator = poolOperator
         self.stakeMark = stakeMark
         self.stakeSet = stakeSet
         self.stakeGo = stakeGo
+    }
+
+    public init(from primitive: Primitive) throws {
+        guard case .list(let f) = primitive, f.count >= 4 else {
+            throw LedgerStateDecodingError.unexpectedFormat(
+                "PoolStakeSnapshotEntry: expected [poolOperator, mark, set, go]")
+        }
+        poolOperator = try PoolOperator(from: f[0])
+        stakeMark    = try Self.uintValue(f[1])
+        stakeSet     = try Self.uintValue(f[2])
+        stakeGo      = try Self.uintValue(f[3])
+    }
+
+    public func toPrimitive() throws -> Primitive {
+        .list([
+            try poolOperator.toPrimitive(),
+            .uint(UInt(stakeMark)),
+            .uint(UInt(stakeSet)),
+            .uint(UInt(stakeGo)),
+        ])
+    }
+
+    public func toDict() throws -> Primitive {
+        var dict = OrderedDictionary<Primitive, Primitive>()
+        dict[.string("poolOperator")] = try poolOperator.toDict()
+        dict[.string("stakeMark")]    = .uint(UInt(stakeMark))
+        dict[.string("stakeSet")]     = .uint(UInt(stakeSet))
+        dict[.string("stakeGo")]      = .uint(UInt(stakeGo))
+        return .orderedDict(dict)
+    }
+
+    private static func uintValue(_ p: Primitive) throws -> UInt64 {
+        switch p {
+        case .uint(let v): return UInt64(v)
+        case .int(let v) where v >= 0: return UInt64(v)
+        default:
+            throw LedgerStateDecodingError.unexpectedFormat("PoolStakeSnapshotEntry: expected uint")
+        }
     }
 }
 
@@ -25,7 +64,7 @@ public struct PoolStakeSnapshotEntry: Sendable, Equatable, Hashable {
 /// Returned by `GetStakeSnapshots` (query tag 20).
 /// Wire format (pallas): `[{ pool_hash → StakeSnapshot }, mark_total, set_total, go_total]`
 /// where `StakeSnapshot = { mark, set, go }` (three UInt64 values in a map or array).
-public struct StakeSnapshots: CBORSerializable, Sendable {
+public struct StakeSnapshots: Serializable {
     public let pools: [PoolStakeSnapshotEntry]
     /// Total active stake at the mark boundary.
     public let totalStakeMark: UInt64
@@ -61,12 +100,12 @@ public struct StakeSnapshots: CBORSerializable, Sendable {
         }
 
         pools = try pairs.map { (key, value) in
-            let poolKeyHash = try Self.bytes(from: key)
+            let poolOperator = try PoolOperator(from: key)
             guard case .list(let snapshotElems) = value, snapshotElems.count >= 3 else {
                 throw LedgerStateDecodingError.unexpectedFormat("StakeSnapshots: expected [mark, set, go] for pool")
             }
             return PoolStakeSnapshotEntry(
-                poolKeyHash: poolKeyHash,
+                poolOperator: poolOperator,
                 stakeMark: try Self.uint(from: snapshotElems[0]),
                 stakeSet: try Self.uint(from: snapshotElems[1]),
                 stakeGo: try Self.uint(from: snapshotElems[2])
@@ -85,7 +124,7 @@ public struct StakeSnapshots: CBORSerializable, Sendable {
                 .uint(UInt(entry.stakeSet)),
                 .uint(UInt(entry.stakeGo)),
             ])
-            poolPairs.append((.bytes(entry.poolKeyHash), snapshot))
+            poolPairs.append((try entry.poolOperator.toPrimitive(), snapshot))
         }
         return .list([
             .frozenDict(Dictionary(uniqueKeysWithValues: poolPairs)),
@@ -107,15 +146,6 @@ public struct StakeSnapshots: CBORSerializable, Sendable {
             && lhs.totalStakeMark == rhs.totalStakeMark
             && lhs.totalStakeSet == rhs.totalStakeSet
             && lhs.totalStakeGo == rhs.totalStakeGo
-    }
-
-    private static func bytes(from p: Primitive) throws -> Data {
-        switch p {
-        case .bytes(let d): return d
-        case .byteArray(let b): return Data(b)
-        default:
-            throw LedgerStateDecodingError.unexpectedFormat("StakeSnapshots: expected bytes for pool key hash")
-        }
     }
 
     private static func uint(from p: Primitive) throws -> UInt64 {

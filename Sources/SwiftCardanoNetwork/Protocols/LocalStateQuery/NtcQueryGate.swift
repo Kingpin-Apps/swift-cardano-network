@@ -60,6 +60,12 @@ public enum NtcQueryGate {
         case stakeSnapshots
         case stakeDelegDeposits
 
+        // Debug / serialised-blob queries (available since NtCv1 — before v9)
+        // Sent as GetCBOR(innerTag) on the wire; response is a CBOR byte string.
+        case currentEpochState     // tag 8  — DebugEpochState   → EpochState CBOR
+        case debugLedgerState      // tag 12 — DebugNewEpochState → NewEpochState CBOR
+        case protocolState         // tag 13 — DebugChainDepState → ChainDepState CBOR
+
         // Removed at v20+
         case proposedProtocolParametersUpdates
 
@@ -118,6 +124,7 @@ public enum NtcQueryGate {
              .utxoByAddress, .utxoWhole, .filteredDelegationsAndRewardAccounts,
              .genesisConfig, .rewardProvenance, .utxoByTxIn, .stakePools, .stakePoolParams,
              .rewardInfoPools, .poolState, .stakeSnapshots, .stakeDelegDeposits,
+             .currentEpochState, .debugLedgerState, .protocolState,
              .proposedProtocolParametersUpdates, .stakeDistribution, .poolDistr:
             return NodeToClientVersion.v9
 
@@ -187,6 +194,9 @@ public enum NtcQueryGate {
         case .poolState:                            return "poolState"
         case .stakeSnapshots:                       return "stakeSnapshots"
         case .stakeDelegDeposits:                   return "stakeDelegDeposits"
+        case .currentEpochState:                    return "currentEpochState"
+        case .debugLedgerState:                     return "debugLedgerState"
+        case .protocolState:                        return "protocolState"
         case .proposedProtocolParametersUpdates:    return "proposedProtocolParametersUpdates"
         case .stakeDistribution:                    return "stakeDistribution"
         case .poolDistr:                            return "poolDistr"

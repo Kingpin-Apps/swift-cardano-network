@@ -86,7 +86,7 @@ extension LedgerPeer: Hashable {}
 ///         [1] uint — peer count (advisory; we count peers by length anyway)
 ///         [2] indefiniteList of v2-shaped peers
 ///                 list[3]: [accStake list[2], poolStake list[2], relays]
-public struct BigLedgerPeerSnapshot: CBORSerializable, Sendable {
+public struct BigLedgerPeerSnapshot: Serializable {
     /// Slot when the snapshot was taken (nil = genesis/origin).
     public let snapshotSlot: UInt64?
     /// Block-hash anchor when the snapshot was taken.  Always nil for v1

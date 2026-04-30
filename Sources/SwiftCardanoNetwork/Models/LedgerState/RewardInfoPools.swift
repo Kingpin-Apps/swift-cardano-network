@@ -32,8 +32,8 @@ public struct RewardGlobalInfo: Sendable, Equatable, Hashable {
 /// Wire format: a CBOR list of 6 elements
 /// `[stake, ownerPledge, ownerStake, cost, margin, performanceEstimate]`.
 public struct PerPoolRewardInfo: Sendable, Equatable, Hashable {
-    /// SHA2-256 hash of the pool's cold verification key (28 bytes).
-    public let poolKeyHash: Data
+    /// Stake-pool operator (bech32 `pool…` ID; underlying 28-byte key hash).
+    public let poolOperator: PoolOperator
     /// Total stake delegated to this pool (lovelace).
     public let stake: UInt64
     /// Declared owner pledge (lovelace).
@@ -48,7 +48,7 @@ public struct PerPoolRewardInfo: Sendable, Equatable, Hashable {
     public let performanceEstimate: Double
 
     public init(
-        poolKeyHash: Data,
+        poolOperator: PoolOperator,
         stake: UInt64,
         ownerPledge: UInt64,
         ownerStake: UInt64,
@@ -56,7 +56,7 @@ public struct PerPoolRewardInfo: Sendable, Equatable, Hashable {
         margin: Fraction,
         performanceEstimate: Double
     ) {
-        self.poolKeyHash = poolKeyHash
+        self.poolOperator = poolOperator
         self.stake = stake
         self.ownerPledge = ownerPledge
         self.ownerStake = ownerStake
@@ -73,7 +73,7 @@ public struct PerPoolRewardInfo: Sendable, Equatable, Hashable {
 /// Wire format: `[globalInfo, pools]` where:
 /// - `globalInfo`: list[4] `[nopt, a0, rPot, totalStake]`
 /// - `pools`: `{ pool_key_hash → list[6] [stake, ownerPledge, ownerStake, cost, margin, performance] }`
-public struct RewardInfoPools: CBORSerializable, Sendable {
+public struct RewardInfoPools: Serializable {
     /// Global epoch-level reward parameters.
     public let globalInfo: RewardGlobalInfo
     /// Per-pool reward information for this epoch.
@@ -111,13 +111,13 @@ public struct RewardInfoPools: CBORSerializable, Sendable {
         }
 
         pools = try pairs.map { (key, value) in
-            let hash = try Self.readBytes(key, label: "pool key hash")
+            let op = try PoolOperator(from: key)
             guard case .list(let p) = value, p.count >= 6 else {
                 throw LedgerStateDecodingError.unexpectedFormat(
                     "RewardInfoPools: per-pool entry must be a list of 6 elements")
             }
             return PerPoolRewardInfo(
-                poolKeyHash:         hash,
+                poolOperator:        op,
                 stake:               try Self.readUInt64(p[0], label: "stake"),
                 ownerPledge:         try Self.readUInt64(p[1], label: "ownerPledge"),
                 ownerStake:          try Self.readUInt64(p[2], label: "ownerStake"),
@@ -147,7 +147,7 @@ public struct RewardInfoPools: CBORSerializable, Sendable {
                 try p.margin.toPrimitive(),
                 .float(p.performanceEstimate),
             ])
-            poolPairs.append((.bytes(p.poolKeyHash), poolPrim))
+            poolPairs.append((try p.poolOperator.toPrimitive(), poolPrim))
         }
 
         return .list([globalPrim, .frozenDict(Dictionary(uniqueKeysWithValues: poolPairs))])

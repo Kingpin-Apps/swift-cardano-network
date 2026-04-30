@@ -35,13 +35,55 @@ public struct CommitteeMembersFilter: Sendable {
 /// - `[0, hot_credential]` = Authorised
 /// - `[1]`                 = NotAuthorised
 /// - `[2, hot_credential]` = Resigned (with the credential used when resigning)
-public enum HotCredentialStatus: Sendable {
+public enum HotCredentialStatus: Serializable {
     case authorised(CommitteeHotCredential)
     case notAuthorised
     case resigned(CommitteeHotCredential)
+
+    public init(from primitive: Primitive) throws {
+        guard case .list(let items) = primitive, !items.isEmpty else {
+            throw LedgerStateDecodingError.unexpectedFormat(
+                "HotCredentialStatus: expected non-empty list")
+        }
+        let code: UInt64
+        switch items[0] {
+        case .uint(let u): code = UInt64(u)
+        case .int(let i) where i >= 0: code = UInt64(i)
+        default:
+            throw LedgerStateDecodingError.unexpectedFormat(
+                "HotCredentialStatus: invalid tag")
+        }
+        switch code {
+        case 0:
+            guard items.count >= 2 else {
+                throw LedgerStateDecodingError.unexpectedFormat(
+                    "HotCredentialStatus: Authorised missing credential")
+            }
+            self = .authorised(try CommitteeHotCredential(from: items[1]))
+        case 1:
+            self = .notAuthorised
+        case 2:
+            guard items.count >= 2 else {
+                throw LedgerStateDecodingError.unexpectedFormat(
+                    "HotCredentialStatus: Resigned missing credential")
+            }
+            self = .resigned(try CommitteeHotCredential(from: items[1]))
+        default:
+            throw LedgerStateDecodingError.unexpectedFormat(
+                "HotCredentialStatus: unknown tag \(code)")
+        }
+    }
+
+    public func toPrimitive() throws -> Primitive {
+        switch self {
+        case .authorised(let c):  return .list([.uint(0), try c.toPrimitive()])
+        case .notAuthorised:      return .list([.uint(1)])
+        case .resigned(let c):    return .list([.uint(2), try c.toPrimitive()])
+        }
+    }
 }
 
-extension HotCredentialStatus: Equatable {
+extension HotCredentialStatus {
     public static func == (lhs: HotCredentialStatus, rhs: HotCredentialStatus) -> Bool {
         switch (lhs, rhs) {
         case (.notAuthorised, .notAuthorised): return true
@@ -52,9 +94,7 @@ extension HotCredentialStatus: Equatable {
         default: return false
         }
     }
-}
 
-extension HotCredentialStatus: Hashable {
     public func hash(into hasher: inout Hasher) {
         switch self {
         case .notAuthorised: hasher.combine(1)
@@ -71,33 +111,151 @@ extension HotCredentialStatus: Hashable {
 /// The authorisation status of a committee member (Active, Expired, or Unrecognised).
 ///
 /// Wire format: integer 0 = Active, 1 = Expired, 2 = Unrecognised.
-public enum MemberStatus: UInt64, Sendable, Equatable, Hashable {
+public enum MemberStatus: UInt64, Serializable {
     case active = 0
     case expired = 1
     case unrecognised = 2
+
+    public init(from primitive: Primitive) throws {
+        let code: UInt64
+        switch primitive {
+        case .uint(let u): code = UInt64(u)
+        case .int(let i) where i >= 0: code = UInt64(i)
+        default:
+            throw LedgerStateDecodingError.unexpectedFormat("MemberStatus: expected uint")
+        }
+        guard let v = MemberStatus(rawValue: code) else {
+            throw LedgerStateDecodingError.unexpectedFormat("MemberStatus: unknown code \(code)")
+        }
+        self = v
+    }
+
+    public func toPrimitive() throws -> Primitive {
+        .uint(UInt(rawValue))
+    }
+}
+
+/// The anticipated change to a committee member's status next epoch.
+///
+/// Wire format: a CBOR list where the first element is the tag:
+/// - `[0]` = NoChangeExpiration — term expiry unchanged
+/// - `[1]` = NoChangeTermExpiration — no term-expiration change
+/// - `[2, epochNo]` = TermAdjusted — term adjusted to the given epoch
+/// - `[3]` = MemberNotFound — member not found in the next committee
+public enum NextEpochChange: Serializable {
+    case noChangeExpiration
+    case noChangeTermExpiration
+    case termAdjusted(UInt64)
+    case memberNotFound
+
+    public init(from primitive: Primitive) throws {
+        guard case .list(let items) = primitive, !items.isEmpty else {
+            throw LedgerStateDecodingError.unexpectedFormat(
+                "NextEpochChange: expected non-empty list")
+        }
+        let tag: UInt64
+        switch items[0] {
+        case .uint(let u): tag = UInt64(u)
+        case .int(let i) where i >= 0: tag = UInt64(i)
+        default:
+            throw LedgerStateDecodingError.unexpectedFormat(
+                "NextEpochChange: expected uint tag, got \(items[0])")
+        }
+        switch tag {
+        case 0: self = .noChangeExpiration
+        case 1: self = .noChangeTermExpiration
+        case 2:
+            guard items.count >= 2 else {
+                throw LedgerStateDecodingError.unexpectedFormat(
+                    "NextEpochChange: TermAdjusted missing epochNo")
+            }
+            switch items[1] {
+            case .uint(let u): self = .termAdjusted(UInt64(u))
+            case .int(let i) where i >= 0: self = .termAdjusted(UInt64(i))
+            default:
+                throw LedgerStateDecodingError.unexpectedFormat(
+                    "NextEpochChange: TermAdjusted epochNo must be uint")
+            }
+        case 3: self = .memberNotFound
+        default:
+            throw LedgerStateDecodingError.unexpectedFormat(
+                "NextEpochChange: unknown tag \(tag)")
+        }
+    }
+
+    public func toPrimitive() throws -> Primitive {
+        switch self {
+        case .noChangeExpiration:     return .list([.uint(0)])
+        case .noChangeTermExpiration: return .list([.uint(1)])
+        case .termAdjusted(let e):   return .list([.uint(2), .uint(UInt(e))])
+        case .memberNotFound:         return .list([.uint(3)])
+        }
+    }
+}
+
+extension NextEpochChange: Equatable {
+    public static func == (lhs: NextEpochChange, rhs: NextEpochChange) -> Bool {
+        (try? lhs.toPrimitive()) == (try? rhs.toPrimitive())
+    }
+}
+
+extension NextEpochChange: Hashable {
+    public func hash(into hasher: inout Hasher) {
+        if let p = try? toPrimitive() { p.hash(into: &hasher) }
+    }
 }
 
 /// The full state of a single constitutional committee member.
-public struct CommitteeMemberState: Sendable, Equatable, Hashable {
+public struct CommitteeMemberState: Serializable {
     /// Hot credential authorisation status for this member.
     public let hotCredentialStatus: HotCredentialStatus
     /// Whether this member's term is currently active, expired, or unrecognised.
     public let memberStatus: MemberStatus
     /// Epoch at which this member's term ends, if defined (`StrictMaybe EpochNo`).
     public let termExpiry: UInt64?
-    /// Raw `NextEpochChange` payload (kept opaque — typically a small enum tag).
-    public let nextEpochChange: Primitive
+    /// The anticipated change to this member's status at the next epoch boundary.
+    public let nextEpochChange: NextEpochChange
 
     public init(
         hotCredentialStatus: HotCredentialStatus,
         memberStatus: MemberStatus,
         termExpiry: UInt64?,
-        nextEpochChange: Primitive
+        nextEpochChange: NextEpochChange
     ) {
         self.hotCredentialStatus = hotCredentialStatus
         self.memberStatus = memberStatus
         self.termExpiry = termExpiry
         self.nextEpochChange = nextEpochChange
+    }
+
+    public init(from primitive: Primitive) throws {
+        guard case .list(let f) = primitive, f.count >= 4 else {
+            throw LedgerStateDecodingError.unexpectedFormat(
+                "CommitteeMemberState: expected [hotCredStatus, memberStatus, expiry, nextEpochChange]")
+        }
+        hotCredentialStatus = try HotCredentialStatus(from: f[0])
+        memberStatus        = try MemberStatus(from: f[1])
+        termExpiry          = Self.decodeStrictMaybeUInt64(f[2])
+        nextEpochChange     = try NextEpochChange(from: f[3])
+    }
+
+    public func toPrimitive() throws -> Primitive {
+        let expiryPrim: Primitive = termExpiry.map { .list([.uint(UInt($0))]) } ?? .list([])
+        return .list([
+            try hotCredentialStatus.toPrimitive(),
+            try memberStatus.toPrimitive(),
+            expiryPrim,
+            try nextEpochChange.toPrimitive(),
+        ])
+    }
+
+    private static func decodeStrictMaybeUInt64(_ p: Primitive) -> UInt64? {
+        guard case .list(let items) = p, let first = items.first else { return nil }
+        switch first {
+        case .uint(let u): return UInt64(u)
+        case .int(let i) where i >= 0: return UInt64(i)
+        default: return nil
+        }
     }
 }
 
@@ -115,16 +273,42 @@ public struct CommitteeMemberState: Sendable, Equatable, Hashable {
 ///   - `nextEpochChange`: opaque enum payload (e.g. `[2]`)
 /// - `threshold`: `StrictMaybe (tag-30 Fraction)` — `[]` (none) or `[fraction]`
 /// - `currentEpoch`: `UInt64`
-public struct CommitteeMembersState: CBORSerializable, Sendable {
+/// A single committee member's full state record (cold credential paired with
+/// hot-credential authorisation status, member status, expiry, and pending
+/// next-epoch change).
+public struct CommitteeMemberStateEntry: Serializable {
+    public let coldCredential: CommitteeColdCredential
+    public let state: CommitteeMemberState
+
+    public init(coldCredential: CommitteeColdCredential, state: CommitteeMemberState) {
+        self.coldCredential = coldCredential
+        self.state = state
+    }
+
+    public init(from primitive: Primitive) throws {
+        guard case .list(let f) = primitive, f.count >= 2 else {
+            throw LedgerStateDecodingError.unexpectedFormat(
+                "CommitteeMemberStateEntry: expected [coldCredential, state]")
+        }
+        coldCredential = try CommitteeColdCredential(from: f[0])
+        state          = try CommitteeMemberState(from: f[1])
+    }
+
+    public func toPrimitive() throws -> Primitive {
+        .list([try coldCredential.toPrimitive(), try state.toPrimitive()])
+    }
+}
+
+public struct CommitteeMembersState: Serializable {
     /// Map of cold credentials to their current member state.
-    public let members: [(coldCredential: CommitteeColdCredential, state: CommitteeMemberState)]
+    public let members: [CommitteeMemberStateEntry]
     /// Current quorum threshold for committee votes, if set.
     public let threshold: Fraction?
     /// Current epoch at which this snapshot was taken.
     public let currentEpoch: UInt64
 
     public init(
-        members: [(coldCredential: CommitteeColdCredential, state: CommitteeMemberState)],
+        members: [CommitteeMemberStateEntry],
         threshold: Fraction?,
         currentEpoch: UInt64
     ) {
@@ -149,35 +333,10 @@ public struct CommitteeMembersState: CBORSerializable, Sendable {
         }
 
         members = try pairs.map { (key, value) in
-            let coldCred = try CommitteeColdCredential(from: key)
-
-            guard case .list(let entry) = value, entry.count >= 4 else {
-                throw LedgerStateDecodingError.unexpectedFormat(
-                    "CommitteeMembersState: expected [hotCredStatus, memberStatus, expiry, nextEpochChange]")
-            }
-
-            let hotStatus = try Self.parseHotCredentialStatus(entry[0])
-
-            let statusCode: UInt64
-            switch entry[1] {
-            case .uint(let u): statusCode = UInt64(u)
-            case .int(let i) where i >= 0: statusCode = UInt64(i)
-            default:
-                throw LedgerStateDecodingError.unexpectedFormat("CommitteeMembersState: invalid member status")
-            }
-            guard let memberStatus = MemberStatus(rawValue: statusCode) else {
-                throw LedgerStateDecodingError.unexpectedFormat("CommitteeMembersState: unknown member status \(statusCode)")
-            }
-
-            let termExpiry = try Self.parseStrictMaybeUInt64(entry[2], label: "termExpiry")
-
-            let state = CommitteeMemberState(
-                hotCredentialStatus: hotStatus,
-                memberStatus: memberStatus,
-                termExpiry: termExpiry,
-                nextEpochChange: entry[3]
+            CommitteeMemberStateEntry(
+                coldCredential: try CommitteeColdCredential(from: key),
+                state: try CommitteeMemberState(from: value)
             )
-            return (coldCredential: coldCred, state: state)
         }
 
         threshold = try Self.parseStrictMaybeFraction(outer[1], label: "threshold")
@@ -187,46 +346,6 @@ public struct CommitteeMembersState: CBORSerializable, Sendable {
         case .int(let i) where i >= 0: currentEpoch = UInt64(i)
         default:
             throw LedgerStateDecodingError.unexpectedFormat("CommitteeMembersState: expected uint for currentEpoch")
-        }
-    }
-
-    private static func parseHotCredentialStatus(_ prim: Primitive) throws -> HotCredentialStatus {
-        guard case .list(let items) = prim, !items.isEmpty else {
-            throw LedgerStateDecodingError.unexpectedFormat("CommitteeMembersState: invalid hotCredStatus encoding")
-        }
-        let code: UInt64
-        switch items[0] {
-        case .uint(let u): code = UInt64(u)
-        case .int(let i) where i >= 0: code = UInt64(i)
-        default:
-            throw LedgerStateDecodingError.unexpectedFormat("CommitteeMembersState: invalid hotCredStatus tag")
-        }
-        switch code {
-        case 0:
-            guard items.count >= 2 else {
-                throw LedgerStateDecodingError.unexpectedFormat("CommitteeMembersState: Authorised missing hot credential")
-            }
-            return .authorised(try CommitteeHotCredential(from: items[1]))
-        case 1:
-            return .notAuthorised
-        case 2:
-            guard items.count >= 2 else {
-                throw LedgerStateDecodingError.unexpectedFormat("CommitteeMembersState: Resigned missing hot credential")
-            }
-            return .resigned(try CommitteeHotCredential(from: items[1]))
-        default:
-            throw LedgerStateDecodingError.unexpectedFormat("CommitteeMembersState: unknown hotCredStatus code \(code)")
-        }
-    }
-
-    private static func parseStrictMaybeUInt64(_ prim: Primitive, label: String) throws -> UInt64? {
-        guard case .list(let items) = prim else { return nil }
-        guard let first = items.first else { return nil }
-        switch first {
-        case .uint(let u): return UInt64(u)
-        case .int(let i) where i >= 0: return UInt64(i)
-        default:
-            throw LedgerStateDecodingError.unexpectedFormat("CommitteeMembersState: expected uint for \(label)")
         }
     }
 
@@ -261,24 +380,10 @@ public struct CommitteeMembersState: CBORSerializable, Sendable {
 
     public func toPrimitive() throws -> Primitive {
         var memberPairs: [(Primitive, Primitive)] = []
-        for (coldCred, state) in members {
-            let hotPrim: Primitive
-            switch state.hotCredentialStatus {
-            case .authorised(let c):
-                hotPrim = .list([.uint(0), try c.toPrimitive()])
-            case .notAuthorised:
-                hotPrim = .list([.uint(1)])
-            case .resigned(let c):
-                hotPrim = .list([.uint(2), try c.toPrimitive()])
-            }
-            let expiryPrim: Primitive = state.termExpiry.map { .list([.uint(UInt($0))]) } ?? .list([])
-            let entryPrim: Primitive = .list([
-                hotPrim,
-                .uint(UInt(state.memberStatus.rawValue)),
-                expiryPrim,
-                state.nextEpochChange,
-            ])
-            memberPairs.append((try coldCred.toPrimitive(), entryPrim))
+        for entry in members {
+            memberPairs.append(
+                (try entry.coldCredential.toPrimitive(), try entry.state.toPrimitive())
+            )
         }
 
         let thresholdPrim: Primitive = try threshold.map { try .list([$0.toPrimitive()]) } ?? .list([])
@@ -301,9 +406,9 @@ public struct CommitteeMembersState: CBORSerializable, Sendable {
     }
 
     public func hash(into hasher: inout Hasher) {
-        for (cred, state) in members {
-            if let p = try? cred.toPrimitive() { p.hash(into: &hasher) }
-            state.hash(into: &hasher)
+        for entry in members {
+            if let p = try? entry.coldCredential.toPrimitive() { p.hash(into: &hasher) }
+            entry.state.hash(into: &hasher)
         }
         threshold.hash(into: &hasher)
         currentEpoch.hash(into: &hasher)

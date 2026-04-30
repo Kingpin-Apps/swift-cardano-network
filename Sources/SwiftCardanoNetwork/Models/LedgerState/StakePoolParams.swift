@@ -1,33 +1,50 @@
 import Foundation
+import OrderedCollections
 import SwiftCardanoCore
 
 /// Per-pool parameters returned by `GetStakePoolParams` (query tag 17).
 ///
 /// Wire format: `{ pool_key_hash: bytes28 → pool_params }` where `pool_params` is
 /// the Ouroboros `PoolParams` CBOR structure.
-public struct StakePoolParamsEntry: Sendable {
-    public let poolKeyHash: Data
+public struct StakePoolParamsEntry: Serializable {
+    public let poolOperator: PoolOperator
     /// The decoded pool parameters for this pool.
     public let params: PoolParams
 
-    public init(poolKeyHash: Data, params: PoolParams) {
-        self.poolKeyHash = poolKeyHash
+    public init(poolOperator: PoolOperator, params: PoolParams) {
+        self.poolOperator = poolOperator
         self.params = params
     }
-}
 
-extension StakePoolParamsEntry: Equatable {
+    public init(from primitive: Primitive) throws {
+        guard case .list(let f) = primitive, f.count >= 2 else {
+            throw LedgerStateDecodingError.unexpectedFormat(
+                "StakePoolParamsEntry: expected [poolOperator, params]")
+        }
+        poolOperator = try PoolOperator(from: f[0])
+        params       = try PoolParams(from: f[1])
+    }
+
+    public func toPrimitive() throws -> Primitive {
+        .list([try poolOperator.toPrimitive(), try params.toPrimitive()])
+    }
+
+    public func toDict() throws -> Primitive {
+        var dict = OrderedDictionary<Primitive, Primitive>()
+        dict[.string("poolOperator")] = try poolOperator.toDict()
+        dict[.string("params")]       = try params.toPrimitive()
+        return .orderedDict(dict)
+    }
+
     public static func == (lhs: StakePoolParamsEntry, rhs: StakePoolParamsEntry) -> Bool {
         guard let lp = try? lhs.params.toPrimitive(), let rp = try? rhs.params.toPrimitive() else {
             return false
         }
-        return lhs.poolKeyHash == rhs.poolKeyHash && lp == rp
+        return lhs.poolOperator == rhs.poolOperator && lp == rp
     }
-}
 
-extension StakePoolParamsEntry: Hashable {
     public func hash(into hasher: inout Hasher) {
-        poolKeyHash.hash(into: &hasher)
+        poolOperator.hash(into: &hasher)
         if let p = try? params.toPrimitive() { p.hash(into: &hasher) }
     }
 }
@@ -35,7 +52,7 @@ extension StakePoolParamsEntry: Hashable {
 /// Stake pool parameters for a set of pools.
 ///
 /// Returned by `GetStakePoolParams` (query tag 17).
-public struct StakePoolParams: CBORSerializable, Sendable {
+public struct StakePoolParams: Serializable {
     public let entries: [StakePoolParamsEntry]
 
     public init(entries: [StakePoolParamsEntry]) {
@@ -51,22 +68,16 @@ public struct StakePoolParams: CBORSerializable, Sendable {
             throw LedgerStateDecodingError.unexpectedFormat("StakePoolParams: expected map")
         }
         entries = try pairs.map { (key, value) in
-            let hash: Data
-            switch key {
-            case .bytes(let d): hash = d
-            case .byteArray(let b): hash = Data(b)
-            default:
-                throw LedgerStateDecodingError.unexpectedFormat("StakePoolParams: expected bytes for pool key hash")
-            }
+            let op = try PoolOperator(from: key)
             let params = try PoolParams(from: value)
-            return StakePoolParamsEntry(poolKeyHash: hash, params: params)
+            return StakePoolParamsEntry(poolOperator: op, params: params)
         }
     }
 
     public func toPrimitive() throws -> Primitive {
         var dict: [(Primitive, Primitive)] = []
         for entry in entries {
-            dict.append((.bytes(entry.poolKeyHash), try entry.params.toPrimitive()))
+            dict.append((try entry.poolOperator.toPrimitive(), try entry.params.toPrimitive()))
         }
         return .frozenDict(Dictionary(uniqueKeysWithValues: dict))
     }

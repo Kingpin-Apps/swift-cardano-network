@@ -31,7 +31,7 @@ extension StakeDelegDepositEntry: Hashable {
 ///
 /// Returned by `GetStakeDelegDeposits` (query tag 22).
 /// Wire format: `{ stake_credential → coin }`
-public struct StakeDelegDeposits: CBORSerializable, Sendable {
+public struct StakeDelegDeposits: Serializable {
     public let entries: [StakeDelegDepositEntry]
 
     public init(entries: [StakeDelegDepositEntry]) {

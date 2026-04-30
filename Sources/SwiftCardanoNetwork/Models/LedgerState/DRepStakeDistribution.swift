@@ -2,7 +2,7 @@ import Foundation
 import SwiftCardanoCore
 
 /// A single entry mapping a DRep to its total delegated stake.
-public struct DRepStakeEntry: Sendable {
+public struct DRepStakeEntry: Serializable {
     /// The DRep this entry belongs to.
     public let drep: DRep
     /// Total stake delegated to this DRep, in lovelace.
@@ -12,15 +12,29 @@ public struct DRepStakeEntry: Sendable {
         self.drep = drep
         self.stake = stake
     }
-}
 
-extension DRepStakeEntry: Equatable {
+    public init(from primitive: Primitive) throws {
+        guard case .list(let f) = primitive, f.count >= 2 else {
+            throw LedgerStateDecodingError.unexpectedFormat(
+                "DRepStakeEntry: expected [drep, stake]")
+        }
+        drep = try DRep(from: f[0])
+        switch f[1] {
+        case .uint(let u):              stake = UInt64(u)
+        case .int(let i) where i >= 0:  stake = UInt64(i)
+        default:
+            throw LedgerStateDecodingError.unexpectedFormat("DRepStakeEntry: expected uint stake")
+        }
+    }
+
+    public func toPrimitive() throws -> Primitive {
+        .list([try drep.toPrimitive(), .uint(UInt(stake))])
+    }
+
     public static func == (lhs: DRepStakeEntry, rhs: DRepStakeEntry) -> Bool {
         (try? lhs.drep.toPrimitive()) == (try? rhs.drep.toPrimitive()) && lhs.stake == rhs.stake
     }
-}
 
-extension DRepStakeEntry: Hashable {
     public func hash(into hasher: inout Hasher) {
         if let p = try? drep.toPrimitive() { p.hash(into: &hasher) }
         stake.hash(into: &hasher)
@@ -31,7 +45,7 @@ extension DRepStakeEntry: Hashable {
 ///
 /// Returned by `GetDRepStakeDistr` (query tag 26).
 /// Wire format: `{ drep_credential → coin }`
-public struct DRepStakeDistribution: CBORSerializable, Sendable {
+public struct DRepStakeDistribution: Serializable {
     public let entries: [DRepStakeEntry]
 
     public init(entries: [DRepStakeEntry]) {

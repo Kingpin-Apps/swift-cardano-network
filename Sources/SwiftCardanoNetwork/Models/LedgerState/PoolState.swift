@@ -1,10 +1,11 @@
 import Foundation
+import OrderedCollections
 import SwiftCardanoCore
 
 /// The state for a single stake pool.
-public struct PoolStateEntry: Sendable {
-    /// SHA2-256 hash of the pool's cold verification key (28 bytes).
-    public let poolKeyHash: Data
+public struct PoolStateEntry: Serializable {
+    /// Stake-pool operator (bech32 `pool…` ID; underlying 28-byte key hash).
+    public let poolOperator: PoolOperator
     /// Current registered pool parameters.
     public let poolParams: PoolParams
     /// Pending pool parameter update queued for the next epoch, if any.
@@ -15,21 +16,68 @@ public struct PoolStateEntry: Sendable {
     public let retiring: UInt64?
 
     public init(
-        poolKeyHash: Data,
+        poolOperator: PoolOperator,
         poolParams: PoolParams,
         futurePoolParams: PoolParams?,
         deposit: UInt64,
         retiring: UInt64?
     ) {
-        self.poolKeyHash = poolKeyHash
+        self.poolOperator = poolOperator
         self.poolParams = poolParams
         self.futurePoolParams = futurePoolParams
         self.deposit = deposit
         self.retiring = retiring
     }
+
+    public init(from primitive: Primitive) throws {
+        guard case .list(let f) = primitive, f.count >= 4 else {
+            throw LedgerStateDecodingError.unexpectedFormat(
+                "PoolStateEntry: expected [poolOperator, poolParams, futureParams?, deposit, retiring?]")
+        }
+        poolOperator     = try PoolOperator(from: f[0])
+        poolParams       = try PoolParams(from: f[1])
+        futurePoolParams = (try? PoolParams(from: f[2]))
+        switch f[3] {
+        case .uint(let u):              deposit = UInt64(u)
+        case .int(let i) where i >= 0:  deposit = UInt64(i)
+        default:                        deposit = 0
+        }
+        if f.count >= 5 {
+            switch f[4] {
+            case .uint(let u):              retiring = UInt64(u)
+            case .int(let i) where i >= 0:  retiring = UInt64(i)
+            default:                        retiring = nil
+            }
+        } else {
+            retiring = nil
+        }
+    }
+
+    public func toPrimitive() throws -> Primitive {
+        var out: [Primitive] = [
+            try poolOperator.toPrimitive(),
+            try poolParams.toPrimitive(),
+            (try futurePoolParams?.toPrimitive()) ?? .null,
+            .uint(UInt(deposit)),
+        ]
+        if let r = retiring { out.append(.uint(UInt(r))) }
+        return .list(out)
+    }
+
+    public func toDict() throws -> Primitive {
+        var dict = OrderedDictionary<Primitive, Primitive>()
+        dict[.string("poolOperator")] = try poolOperator.toDict()
+        dict[.string("poolParams")]   = try poolParams.toPrimitive()
+        if let f = futurePoolParams {
+            dict[.string("futurePoolParams")] = try f.toPrimitive()
+        }
+        dict[.string("deposit")] = .uint(UInt(deposit))
+        if let r = retiring { dict[.string("retiring")] = .uint(UInt(r)) }
+        return .orderedDict(dict)
+    }
 }
 
-extension PoolStateEntry: Equatable {
+extension PoolStateEntry {
     public static func == (lhs: PoolStateEntry, rhs: PoolStateEntry) -> Bool {
         guard
             let lp = try? lhs.poolParams.toPrimitive(),
@@ -44,17 +92,15 @@ extension PoolStateEntry: Equatable {
             default: return false
             }
         }()
-        return lhs.poolKeyHash == rhs.poolKeyHash
+        return lhs.poolOperator == rhs.poolOperator
             && lp == rp
             && futureEq
             && lhs.deposit == rhs.deposit
             && lhs.retiring == rhs.retiring
     }
-}
 
-extension PoolStateEntry: Hashable {
     public func hash(into hasher: inout Hasher) {
-        poolKeyHash.hash(into: &hasher)
+        poolOperator.hash(into: &hasher)
         if let p = try? poolParams.toPrimitive() { p.hash(into: &hasher) }
         deposit.hash(into: &hasher)
         retiring.hash(into: &hasher)
@@ -72,7 +118,7 @@ extension PoolStateEntry: Hashable {
 /// - `deposits`: `{ pool_key_hash → coin }` — pool deposit balances
 ///
 /// Entries are derived from the `currentParams` map and enriched from the other maps.
-public struct PoolState: CBORSerializable, Sendable {
+public struct PoolState: Serializable {
     public let entries: [PoolStateEntry]
 
     public init(entries: [PoolStateEntry]) {
@@ -92,8 +138,9 @@ public struct PoolState: CBORSerializable, Sendable {
         let deposits = try Self.parseEpochMap(outer[3], label: "deposits")
 
         entries = current.map { (hash, params) in
-            PoolStateEntry(
-                poolKeyHash: hash,
+            let op = PoolOperator(poolKeyHash: PoolKeyHash(payload: hash))
+            return PoolStateEntry(
+                poolOperator: op,
                 poolParams: params,
                 futurePoolParams: future[hash],
                 deposit: deposits[hash] ?? 0,
@@ -108,7 +155,7 @@ public struct PoolState: CBORSerializable, Sendable {
         var retiring: [(Primitive, Primitive)] = []
         var deposits: [(Primitive, Primitive)] = []
         for entry in entries {
-            let key = Primitive.bytes(entry.poolKeyHash)
+            let key = try entry.poolOperator.toPrimitive()
             current.append((key, try entry.poolParams.toPrimitive()))
             if let f = entry.futurePoolParams {
                 future.append((key, try f.toPrimitive()))

@@ -191,6 +191,27 @@ extension NodeToClientConnection {
         try await stateQuery.queryBigLedgerPeerSnapshot()
     }
 
+    // MARK: - Debug / serialised-blob queries (GetCBOR — tags 8, 12, 13)
+
+    /// Query the full current epoch state (treasury, reserves, and opaque sub-structures).
+    ///
+    /// - Warning: This returns a very large response on mainnet.
+    public func queryCurrentEpochState() async throws -> CurrentEpochState {
+        try await stateQuery.queryCurrentEpochState()
+    }
+
+    /// Query the full new-epoch state (epoch number, block counts, pool distribution).
+    ///
+    /// - Warning: This returns a superset of `queryCurrentEpochState` and is even larger.
+    public func queryDebugLedgerState() async throws -> DebugLedgerState {
+        try await stateQuery.queryDebugLedgerState()
+    }
+
+    /// Query the consensus protocol state, including per-pool operational certificate counters.
+    public func queryProtocolState() async throws -> ChainDepState {
+        try await stateQuery.queryProtocolState()
+    }
+
     // MARK: - Transaction submission
 
     /// Serialise and submit a fully-typed Conway `Transaction`.

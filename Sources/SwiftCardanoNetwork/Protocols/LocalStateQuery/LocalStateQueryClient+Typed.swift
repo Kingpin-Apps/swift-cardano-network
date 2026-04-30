@@ -299,4 +299,66 @@ extension LocalStateQueryClient {
         let result = try await query(q)
         return try result.decode(BigLedgerPeerSnapshot.self)
     }
+
+    // MARK: Debug / serialised-blob queries (tags 8, 12, 13 via GetCBOR wrapper)
+
+    /// Query the full current epoch state.
+    ///
+    /// Sends `GetCBOR(DebugEpochState)` and decodes the response into a
+    /// `CurrentEpochState` with the treasury/reserves fully parsed and the
+    /// ledger sub-structures kept as opaque blobs.
+    ///
+    /// - Warning: This returns the complete epoch state and can be a very large
+    ///   response on mainnet.
+    public func queryCurrentEpochState() async throws -> CurrentEpochState {
+        let result = try await query(.currentEpochState(at: negotiatedVersion))
+        let inner = try unwrapCBORByteString(result.rawCBOR)
+        return try CurrentEpochState.fromCBOR(data: inner)
+    }
+
+    /// Query the full new-epoch state (epoch state + block counts + pool distribution).
+    ///
+    /// Sends `GetCBOR(DebugNewEpochState)` and decodes the response into a
+    /// `DebugLedgerState` with the epoch number, block-made maps, and embedded
+    /// epoch state fully parsed.
+    ///
+    /// - Warning: This returns a superset of `queryCurrentEpochState` and is
+    ///   even larger.
+    public func queryDebugLedgerState() async throws -> DebugLedgerState {
+        let result = try await query(.debugLedgerState(at: negotiatedVersion))
+        let inner = try unwrapCBORByteString(result.rawCBOR)
+        return try DebugLedgerState.fromCBOR(data: inner)
+    }
+
+    /// Query the consensus protocol state, including per-pool operational
+    /// certificate counters.
+    ///
+    /// Sends `GetCBOR(DebugChainDepState)` and decodes the response into a
+    /// `ChainDepState`.  `operationalCertCounters` maps each pool's issuer
+    /// key hash to its current OCert sequence number — the data that powers
+    /// Ogmios's `queryLedgerState/operationalCertificates`.
+    public func queryProtocolState() async throws -> ChainDepState {
+        let result = try await query(.protocolState(at: negotiatedVersion))
+        let inner = try unwrapCBORByteString(result.rawCBOR)
+        return try ChainDepState.fromCBOR(data: inner)
+    }
+}
+
+// MARK: - Private helpers
+
+extension LocalStateQueryClient {
+
+    /// Unwrap the outer CBOR byte string produced by a `GetCBOR` response.
+    ///
+    /// The node encodes `GetCBOR` results as a CBOR byte string (major type 2),
+    /// optionally preceded by CBOR tag 24 (`#6.24`) which signals embedded CBOR.
+    /// Both forms are handled; the returned `Data` is the inner serialised value.
+    func unwrapCBORByteString(_ buf: ByteBuffer) throws -> Data {
+        var b = buf
+        if CBORLite.peekMajorType(from: b) == CBORLite.majorTag {
+            _ = try CBORLite.readTag(from: &b)
+        }
+        let inner = try CBORLite.readByteStringBuffer(from: &b)
+        return Data(inner.readableBytesView)
+    }
 }

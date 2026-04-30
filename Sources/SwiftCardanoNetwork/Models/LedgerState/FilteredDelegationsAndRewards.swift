@@ -1,33 +1,57 @@
 import Foundation
+import OrderedCollections
 import SwiftCardanoCore
 
-/// A single delegation entry: stake credential → pool key hash (if delegated).
-public struct DelegationEntry: Sendable {
+/// A single delegation entry: stake credential → pool operator (if delegated).
+public struct DelegationEntry: Serializable {
     public let credential: StakeCredential
-    public let poolKeyHash: Data?
+    public let poolOperator: PoolOperator?
 
-    public init(credential: StakeCredential, poolKeyHash: Data?) {
+    public init(credential: StakeCredential, poolOperator: PoolOperator?) {
         self.credential = credential
-        self.poolKeyHash = poolKeyHash
+        self.poolOperator = poolOperator
     }
-}
 
-extension DelegationEntry: Equatable {
+    public init(from primitive: Primitive) throws {
+        guard case .list(let f) = primitive, f.count >= 2 else {
+            throw LedgerStateDecodingError.unexpectedFormat(
+                "DelegationEntry: expected [credential, poolOperator?]")
+        }
+        credential = try StakeCredential(from: f[0])
+        if case .null = f[1] {
+            poolOperator = nil
+        } else {
+            poolOperator = try PoolOperator(from: f[1])
+        }
+    }
+
+    public func toPrimitive() throws -> Primitive {
+        .list([
+            try credential.toPrimitive(),
+            (try poolOperator?.toPrimitive()) ?? .null,
+        ])
+    }
+
+    public func toDict() throws -> Primitive {
+        var dict = OrderedDictionary<Primitive, Primitive>()
+        dict[.string("credential")]   = try credential.toPrimitive()
+        dict[.string("poolOperator")] = try poolOperator.map { try $0.toDict() } ?? .null
+        return .orderedDict(dict)
+    }
+
     public static func == (lhs: DelegationEntry, rhs: DelegationEntry) -> Bool {
         (try? lhs.credential.toPrimitive()) == (try? rhs.credential.toPrimitive())
-            && lhs.poolKeyHash == rhs.poolKeyHash
+            && lhs.poolOperator == rhs.poolOperator
     }
-}
 
-extension DelegationEntry: Hashable {
     public func hash(into hasher: inout Hasher) {
         if let p = try? credential.toPrimitive() { p.hash(into: &hasher) }
-        poolKeyHash.hash(into: &hasher)
+        poolOperator.hash(into: &hasher)
     }
 }
 
 /// A single reward account entry: stake credential → lovelace balance.
-public struct RewardAccountEntry: Sendable {
+public struct RewardAccountEntry: Serializable {
     public let credential: StakeCredential
     public let lovelace: UInt64
 
@@ -35,16 +59,37 @@ public struct RewardAccountEntry: Sendable {
         self.credential = credential
         self.lovelace = lovelace
     }
-}
 
-extension RewardAccountEntry: Equatable {
+    public init(from primitive: Primitive) throws {
+        guard case .list(let f) = primitive, f.count >= 2 else {
+            throw LedgerStateDecodingError.unexpectedFormat(
+                "RewardAccountEntry: expected [credential, lovelace]")
+        }
+        credential = try StakeCredential(from: f[0])
+        switch f[1] {
+        case .uint(let u):              lovelace = UInt64(u)
+        case .int(let i) where i >= 0:  lovelace = UInt64(i)
+        default:
+            throw LedgerStateDecodingError.unexpectedFormat("RewardAccountEntry: expected uint lovelace")
+        }
+    }
+
+    public func toPrimitive() throws -> Primitive {
+        .list([try credential.toPrimitive(), .uint(UInt(lovelace))])
+    }
+
+    public func toDict() throws -> Primitive {
+        var dict = OrderedDictionary<Primitive, Primitive>()
+        dict[.string("credential")] = try credential.toPrimitive()
+        dict[.string("lovelace")]   = .uint(UInt(lovelace))
+        return .orderedDict(dict)
+    }
+
     public static func == (lhs: RewardAccountEntry, rhs: RewardAccountEntry) -> Bool {
         (try? lhs.credential.toPrimitive()) == (try? rhs.credential.toPrimitive())
             && lhs.lovelace == rhs.lovelace
     }
-}
 
-extension RewardAccountEntry: Hashable {
     public func hash(into hasher: inout Hasher) {
         if let p = try? credential.toPrimitive() { p.hash(into: &hasher) }
         lovelace.hash(into: &hasher)
@@ -55,7 +100,7 @@ extension RewardAccountEntry: Hashable {
 ///
 /// Returned by `GetFilteredDelegationsAndRewardAccounts` (query tag 10).
 /// Wire format: `[{ credential → pool_key_hash | null }, { credential → lovelace }]`
-public struct FilteredDelegationsAndRewards: CBORSerializable, Sendable {
+public struct FilteredDelegationsAndRewards: Serializable {
     public let delegations: [DelegationEntry]
     public let rewardAccounts: [RewardAccountEntry]
 
@@ -84,15 +129,12 @@ public struct FilteredDelegationsAndRewards: CBORSerializable, Sendable {
         }
         return try pairs.map { (key, value) in
             let credential = try StakeCredential(from: key)
-            let poolKeyHash: Data?
+            let poolOperator: PoolOperator?
             switch value {
-            case .bytes(let d): poolKeyHash = d
-            case .byteArray(let b): poolKeyHash = Data(b)
-            case .null: poolKeyHash = nil
-            default:
-                throw LedgerStateDecodingError.unexpectedFormat("FilteredDelegationsAndRewards: delegation value must be bytes or null")
+            case .null: poolOperator = nil
+            default:    poolOperator = try PoolOperator(from: value)
             }
-            return DelegationEntry(credential: credential, poolKeyHash: poolKeyHash)
+            return DelegationEntry(credential: credential, poolOperator: poolOperator)
         }
     }
 
@@ -120,7 +162,7 @@ public struct FilteredDelegationsAndRewards: CBORSerializable, Sendable {
     public func toPrimitive() throws -> Primitive {
         let delegPairs = try delegations.map { entry -> (Primitive, Primitive) in
             let key = try entry.credential.toPrimitive()
-            let val: Primitive = entry.poolKeyHash.map { .bytes($0) } ?? .null
+            let val: Primitive = try entry.poolOperator.map { try $0.toPrimitive() } ?? .null
             return (key, val)
         }
         let rewardPairs = try rewardAccounts.map { entry -> (Primitive, Primitive) in

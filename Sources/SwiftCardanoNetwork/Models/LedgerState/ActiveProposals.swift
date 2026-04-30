@@ -9,7 +9,7 @@ import SwiftCardanoCore
 /// is itself a 7-element list `[govActionID, committeeVotes, dRepVotes, stakePoolVotes,
 /// proposalProcedure, proposedIn, expiresAfter]` — the same shape as proposals in
 /// `GovernanceState.proposals.proposals`.
-public struct ActiveProposals: CBORSerializable, Sendable {
+public struct ActiveProposals: Serializable {
     public let proposals: [GovernanceProposal]
 
     public init(proposals: [GovernanceProposal]) {

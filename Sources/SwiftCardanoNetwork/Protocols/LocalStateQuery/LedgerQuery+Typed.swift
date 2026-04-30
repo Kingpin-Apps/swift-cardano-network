@@ -28,8 +28,12 @@ import SwiftCardanoCore
 //   GetStakeDistribution                    = 5   (removed at NtCv21+; emit tag 37)
 //   GetUTxOByAddress                        = 6
 //   GetUTxOWhole                            = 7
+//   DebugEpochState                         = 8   (sent as GetCBOR([8]); response is CBOR bytes)
+//   GetCBOR                                 = 9   (internal wrapper; not exposed as a factory)
 //   GetFilteredDelegationAndRewardAccounts  = 10
 //   GetGenesisConfig                        = 11
+//   DebugNewEpochState                      = 12  (sent as GetCBOR([12]); response is CBOR bytes)
+//   DebugChainDepState                      = 13  (sent as GetCBOR([13]); response is CBOR bytes)
 //   GetRewardProvenance                     = 14
 //   GetUTxOByTxIn                           = 15
 //   GetStakePools                           = 16
@@ -77,6 +81,42 @@ extension LedgerQuery {
     ///   `utxoByAddress` or `utxoByTxIn` for targeted queries.
     public static func utxoWhole(at version: UInt16 = NodeToClientVersion.v16) -> LedgerQuery {
         .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: simpleQueryBuf(tag: 7)))
+    }
+
+    /// Query the full current epoch state (serialised CBOR blob).
+    ///
+    /// Wire form: `GetCBOR(DebugEpochState)` = `[9, [8]]`.
+    /// Response: CBOR byte string containing the CBOR-encoded `EpochState` for
+    /// the current era.  Decode with `LocalStateQueryClient.queryCurrentEpochState()`.
+    ///
+    /// - Warning: This returns the complete epoch state and can be a very large
+    ///   response on mainnet.
+    public static func currentEpochState(at version: UInt16 = NodeToClientVersion.v16) -> LedgerQuery {
+        .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: cborWrappedQueryBuf(innerTag: 8)))
+    }
+
+    /// Query the full new-epoch state (serialised CBOR blob).
+    ///
+    /// Wire form: `GetCBOR(DebugNewEpochState)` = `[9, [12]]`.
+    /// Response: CBOR byte string containing the CBOR-encoded `NewEpochState`,
+    /// which includes the epoch state, block counts, and pool distribution.
+    /// Decode with `LocalStateQueryClient.queryDebugLedgerState()`.
+    ///
+    /// - Warning: This returns a superset of `currentEpochState` and is even
+    ///   larger.
+    public static func debugLedgerState(at version: UInt16 = NodeToClientVersion.v16) -> LedgerQuery {
+        .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: cborWrappedQueryBuf(innerTag: 12)))
+    }
+
+    /// Query the consensus protocol state (serialised CBOR blob).
+    ///
+    /// Wire form: `GetCBOR(DebugChainDepState)` = `[9, [13]]`.
+    /// Response: CBOR byte string containing the CBOR-encoded `ChainDepState`
+    /// (i.e. `PraosState` for Shelley+ eras), which includes per-pool
+    /// operational certificate counters (`praosStateOCertCounters`).
+    /// Decode with `LocalStateQueryClient.queryProtocolState()`.
+    public static func protocolState(at version: UInt16 = NodeToClientVersion.v16) -> LedgerQuery {
+        .raw(RawQuery(era: Era.conway.rawQueryEra, rawCBOR: cborWrappedQueryBuf(innerTag: 13)))
     }
 
     /// Query the genesis configuration for the current era.
@@ -529,6 +569,21 @@ private func simpleQueryBuf(tag: UInt64) -> ByteBuffer {
     var buf = ByteBufferAllocator().buffer(capacity: 4)
     CBORLite.writeArrayHeader(count: 1, into: &buf)
     CBORLite.writeUInt(tag, into: &buf)
+    return buf
+}
+
+/// Build a `GetCBOR`-wrapped query `[9, [innerTag]]`.
+///
+/// `GetCBOR` (tag 9) instructs the node to return the query result as a
+/// CBOR-serialised byte string rather than an inline typed value.  Used for
+/// large or consensus-internal blobs: `DebugEpochState` (8),
+/// `DebugNewEpochState` (12), `DebugChainDepState` (13).
+private func cborWrappedQueryBuf(innerTag: UInt64) -> ByteBuffer {
+    var buf = ByteBufferAllocator().buffer(capacity: 8)
+    CBORLite.writeArrayHeader(count: 2, into: &buf)
+    CBORLite.writeUInt(9, into: &buf)
+    CBORLite.writeArrayHeader(count: 1, into: &buf)
+    CBORLite.writeUInt(innerTag, into: &buf)
     return buf
 }
 

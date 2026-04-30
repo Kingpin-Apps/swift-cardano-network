@@ -19,7 +19,7 @@ import SwiftCardanoCore
 ///
 /// NOTE: CBOR field ordering is based on Haskell ToCBOR instances in cardano-ledger.
 /// Verify against live node output and adjust field indices if decoding fails.
-public enum GenesisConfig: CBORSerializable, Sendable {
+public enum GenesisConfig: Serializable {
     case shelley(ShelleyGenesis)
     case alonzo(AlonzoGenesis)
     case conway(ConwayGenesis)

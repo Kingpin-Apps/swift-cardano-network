@@ -4,7 +4,7 @@ import SwiftCardanoCore
 ///
 /// Returned by `GetAccountState` (query tag 29).
 /// Wire format: `[treasury: uint, reserves: uint]`
-public struct AccountState: CBORSerializable, Sendable {
+public struct AccountState: Serializable {
     public let treasury: UInt64
     public let reserves: UInt64
 

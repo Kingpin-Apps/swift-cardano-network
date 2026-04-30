@@ -52,7 +52,7 @@ public struct NonMyopicRewardEntry: Sendable, Equatable, Hashable {
 ///
 /// Returned by `GetNonMyopicMemberRewards` (query tag 2).
 /// Wire format: `{ (coin | stake_credential) → coin_rewards }`
-public struct NonMyopicMemberRewards: CBORSerializable, Sendable {
+public struct NonMyopicMemberRewards: Serializable {
     public let entries: [NonMyopicRewardEntry]
 
     public init(entries: [NonMyopicRewardEntry]) {

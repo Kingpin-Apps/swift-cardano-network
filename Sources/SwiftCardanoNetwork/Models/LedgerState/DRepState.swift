@@ -2,7 +2,7 @@ import Foundation
 import SwiftCardanoCore
 
 /// State for a single DRep.
-public struct DRepStateEntry: Sendable {
+public struct DRepStateEntry: Serializable {
     /// The DRep this entry describes.
     public let drep: DRep
     /// Optional anchor (URL + data hash); nil if the DRep has no anchor.
@@ -18,18 +18,45 @@ public struct DRepStateEntry: Sendable {
         self.deposit = deposit
         self.expiry = expiry
     }
-}
 
-extension DRepStateEntry: Equatable {
+    public init(from primitive: Primitive) throws {
+        guard case .list(let f) = primitive, f.count >= 4 else {
+            throw LedgerStateDecodingError.unexpectedFormat(
+                "DRepStateEntry: expected [drep, expiry, anchor?, deposit]")
+        }
+        drep = try DRep(from: f[0])
+        switch f[1] {
+        case .uint(let u):              expiry = UInt64(u)
+        case .int(let i) where i >= 0:  expiry = UInt64(i)
+        default:
+            throw LedgerStateDecodingError.unexpectedFormat("DRepStateEntry: expected uint expiry")
+        }
+        anchor = (f[2] == .null) ? nil : (try? LedgerAnchor(from: f[2]))
+        switch f[3] {
+        case .uint(let u):              deposit = UInt64(u)
+        case .int(let i) where i >= 0:  deposit = UInt64(i)
+        default:
+            throw LedgerStateDecodingError.unexpectedFormat("DRepStateEntry: expected uint deposit")
+        }
+    }
+
+    public func toPrimitive() throws -> Primitive {
+        let anchorPrim: Primitive = try anchor.map { try $0.toPrimitive() } ?? .null
+        return .list([
+            try drep.toPrimitive(),
+            .uint(UInt(expiry)),
+            anchorPrim,
+            .uint(UInt(deposit)),
+        ])
+    }
+
     public static func == (lhs: DRepStateEntry, rhs: DRepStateEntry) -> Bool {
         (try? lhs.drep.toPrimitive()) == (try? rhs.drep.toPrimitive())
             && lhs.anchor == rhs.anchor
             && lhs.deposit == rhs.deposit
             && lhs.expiry == rhs.expiry
     }
-}
 
-extension DRepStateEntry: Hashable {
     public func hash(into hasher: inout Hasher) {
         if let p = try? drep.toPrimitive() { p.hash(into: &hasher) }
         anchor.hash(into: &hasher)
@@ -42,7 +69,7 @@ extension DRepStateEntry: Hashable {
 ///
 /// Returned by `GetDRepState` (query tag 25).
 /// Wire format: `{ drep_credential → [expiry, anchor | null, deposit] }`
-public struct DRepState: CBORSerializable, Sendable {
+public struct DRepState: Serializable {
     public let entries: [DRepStateEntry]
 
     public init(entries: [DRepStateEntry]) {
