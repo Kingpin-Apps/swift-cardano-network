@@ -1,3 +1,9 @@
+## 1.0.5 (2026-04-30)
+
+### Fix
+
+- Add unit tests for CurrentEpochState, DebugLedgerState, and ChainDepState models
+
 ## 1.0.4 (2026-04-28)
 
 ### Fix
