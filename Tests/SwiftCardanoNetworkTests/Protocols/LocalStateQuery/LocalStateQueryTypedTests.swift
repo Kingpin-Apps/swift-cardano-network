@@ -430,7 +430,7 @@ struct LocalStateQueryClientTypedTests {
         let (channel, client) = try await makeClient(port: node.port, group: group)
 
         let state: ChainDepState = try await client.queryProtocolState()
-        let expectedKey = Data(repeating: 0xAB, count: 28)
+        let expectedKey = try PoolOperator(from: Data(repeating: 0xAB, count: 28))
         #expect(state.operationalCertCounters[expectedKey] == 3)
         #expect(state.operationalCertCounters.count == 1)
 

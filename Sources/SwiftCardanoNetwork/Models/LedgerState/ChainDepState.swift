@@ -31,9 +31,9 @@ public struct ChainDepState: Serializable {
 
     /// Per-pool operational certificate counters.
     ///
-    /// Key: 28-byte pool issuer key hash (`KeyHash 'BlockIssuer`, Blake2b-224).
+    /// Key: pool operator (`PoolOperator`, Blake2b-224 key hash).
     /// Value: current OCert sequence number (incremented on each new cert).
-    public let operationalCertCounters: [Data: UInt64]
+    public let operationalCertCounters: [PoolOperator: UInt64]
 
     /// Slot number of the last block processed by consensus, if any.
     public let lastSlot: UInt64?
@@ -65,7 +65,7 @@ public struct ChainDepState: Serializable {
     public let rawExtraFields: [Primitive]
 
     public init(
-        operationalCertCounters: [Data: UInt64],
+        operationalCertCounters: [PoolOperator: UInt64],
         lastSlot: UInt64?,
         evolvingNonce: Data? = nil,
         candidateNonce: Data? = nil,
@@ -226,7 +226,7 @@ public struct ChainDepState: Serializable {
     /// Scan `f[1...]` for a CBOR map whose first key is a 28-byte byte string and
     /// whose values are uints — that is `praosStateOCertCounters` regardless of
     /// which field index the node places it at.
-    private static func locateOCertCounters(in f: [Primitive]) -> (index: Int, [Data: UInt64])? {
+    private static func locateOCertCounters(in f: [Primitive]) -> (index: Int, [PoolOperator: UInt64])? {
         for i in 1..<f.count {
             let pairs: [(Primitive, Primitive)]
             switch f[i] {
@@ -253,7 +253,7 @@ public struct ChainDepState: Serializable {
             }
 
             // Decode all pairs.
-            var out: [Data: UInt64] = [:]
+            var out: [PoolOperator: UInt64] = [:]
             out.reserveCapacity(pairs.count)
             var allDecoded = true
             for (k, v) in pairs {
@@ -271,19 +271,20 @@ public struct ChainDepState: Serializable {
                     default:                       return nil
                     }
                 }()
-                guard let kb = keyBytes, let c = counter else { allDecoded = false; break }
-                out[kb] = c
+                guard let kb = keyBytes, let c = counter,
+                      let op = try? PoolOperator(from: kb) else { allDecoded = false; break }
+                out[op] = c
             }
             if allDecoded { return (i, out) }
         }
         return nil
     }
 
-    private static func encodeOCertCounters(_ m: [Data: UInt64]) throws -> Primitive {
+    private static func encodeOCertCounters(_ m: [PoolOperator: UInt64]) throws -> Primitive {
         var dict: [(Primitive, Primitive)] = []
         dict.reserveCapacity(m.count)
         for (k, v) in m {
-            dict.append((.bytes(k), .uint(UInt(v))))
+            dict.append((try k.toPrimitive(), .uint(UInt(v))))
         }
         return .frozenDict(Dictionary(uniqueKeysWithValues: dict))
     }

@@ -51,7 +51,8 @@ import Testing
             counters,           // ocertCounters
         ])
         let state = try ChainDepState(from: primitive)
-        #expect(state.operationalCertCounters[poolHash] == 3)
+        let poolOp = try PoolOperator(from: poolHash)
+        #expect(state.operationalCertCounters[poolOp] == 3)
         #expect(state.operationalCertCounters.count == 1)
     }
 
@@ -76,7 +77,8 @@ import Testing
         ])
         let state = try ChainDepState(from: primitive)
         let roundTripped = try ChainDepState(from: try state.toPrimitive())
-        #expect(roundTripped.operationalCertCounters[poolHash] == 7)
+        let poolOp = try PoolOperator(from: poolHash)
+        #expect(roundTripped.operationalCertCounters[poolOp] == 7)
     }
 
     @Test("init(from:) throws when ocertCounters key is not bytes")
@@ -162,8 +164,9 @@ import Testing
         ])
         let wrapped = Primitive.list([.uint(0), inner])
         let state = try ChainDepState(from: wrapped)
+        let poolOp = try PoolOperator(from: poolHash)
         #expect(state.lastSlot == 111_000_000)
-        #expect(state.operationalCertCounters[poolHash] == 5)
+        #expect(state.operationalCertCounters[poolOp] == 5)
     }
 
     @Test("decodes 8-element PraosState (six nonce slots, ocertCounters at index 6)")
@@ -177,8 +180,9 @@ import Testing
             .dict([.bytes(poolHash): .uint(9)]),     // ocertCounters at index 7
         ])
         let state = try ChainDepState(from: primitive)
+        let poolOp = try PoolOperator(from: poolHash)
         #expect(state.lastSlot == 111_000_000)
-        #expect(state.operationalCertCounters[poolHash] == 9)
+        #expect(state.operationalCertCounters[poolOp] == 9)
         #expect(state.rawExtraFields.isEmpty)
     }
 
@@ -249,7 +253,8 @@ import Testing
         #expect(state2.previousEpochNonce == nil)
         #expect(state2.labNonce == nonce)
         #expect(state2.lastEpochBlockNonce == nil)
-        #expect(state2.operationalCertCounters[poolHash] == 2)
+        let poolOp = try PoolOperator(from: poolHash)
+        #expect(state2.operationalCertCounters[poolOp] == 2)
     }
 
     @Test("nonces decode correctly when ocertCounters is at live-node index 1")
@@ -268,8 +273,9 @@ import Testing
             .null,                                   // lastEpochBlockNonce
         ])
         let state = try ChainDepState(from: primitive)
+        let poolOp = try PoolOperator(from: poolHash)
         #expect(state.lastSlot == 110_000_000)
-        #expect(state.operationalCertCounters[poolHash] == 7)
+        #expect(state.operationalCertCounters[poolOp] == 7)
         #expect(state.evolvingNonce == nonce)
         #expect(state.candidateNonce == nil)
         #expect(state.previousEpochNonce == nil)
@@ -323,8 +329,9 @@ import Testing
             .list([.uint(1), .bytes(nonce5)]),           // lastEpochBlockNonce
         ])
         let state = try ChainDepState(from: primitive)
+        let poolOp = try PoolOperator(from: poolHash)
         #expect(state.lastSlot == 110_926_685)
-        #expect(state.operationalCertCounters[poolHash] == 4)
+        #expect(state.operationalCertCounters[poolOp] == 4)
         #expect(state.evolvingNonce == nonce0)
         #expect(state.candidateNonce == nonce1)
         #expect(state.epochNonce == nonce2)
@@ -409,7 +416,8 @@ import Testing
         #expect(state2.previousEpochNonce  == nil)
         #expect(state2.labNonce            == nonce)
         #expect(state2.lastEpochBlockNonce == nil)
-        #expect(state2.operationalCertCounters[poolHash] == 2)
+        let poolOp = try PoolOperator(from: poolHash)
+        #expect(state2.operationalCertCounters[poolOp] == 2)
     }
 
     @Test("legacy null/bytes(32) Nonce forms are still decoded for backwards compat")

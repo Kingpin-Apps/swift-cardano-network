@@ -334,8 +334,8 @@ extension LocalStateQueryClient {
     /// certificate counters.
     ///
     /// Sends `GetCBOR(DebugChainDepState)` and decodes the response into a
-    /// `ChainDepState`.  `operationalCertCounters` maps each pool's issuer
-    /// key hash to its current OCert sequence number — the data that powers
+    /// `ChainDepState`.  `operationalCertCounters` maps each `PoolOperator`
+    /// to its current OCert sequence number — the data that powers
     /// Ogmios's `queryLedgerState/operationalCertificates`.
     public func queryProtocolState() async throws -> ChainDepState {
         let result = try await query(.protocolState(at: negotiatedVersion))
