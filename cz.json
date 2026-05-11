@@ -3,7 +3,7 @@
     "name": "cz_conventional_commits",
     "tag_format": "$version",
     "version_scheme": "semver",
-    "version": "1.0.7",
+    "version": "1.0.8",
     "update_changelog_on_bump": true,
     "version_files": [
       "Sources/SwiftCardanoNetwork/Resources/version.json:version"
