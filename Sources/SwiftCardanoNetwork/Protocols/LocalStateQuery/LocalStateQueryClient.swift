@@ -153,10 +153,9 @@ public struct LocalStateQueryClient: Sendable {
             return try s.afterSend(.release)
         }
 
-        let elapsed = start.distance(to: .now())
         CardanoMetrics
             .timer(CardanoMetrics.queryDurationSeconds, dimensions: [("query", "raw")])
-            .recordNanoseconds(elapsed.nanoseconds)
+            .recordNanoseconds(DispatchTime.nanosecondsSince(start))
 
         return rawResult
     }
@@ -177,17 +176,3 @@ public struct LocalStateQueryClient: Sendable {
     }
 }
 
-// MARK: - DispatchTimeInterval helpers
-
-private extension DispatchTimeInterval {
-    var nanoseconds: Int64 {
-        switch self {
-        case .nanoseconds(let n):  return Int64(n)
-        case .microseconds(let n): return Int64(n) * 1_000
-        case .milliseconds(let n): return Int64(n) * 1_000_000
-        case .seconds(let n):      return Int64(n) * 1_000_000_000
-        case .never:               return 0
-        @unknown default:          return 0
-        }
-    }
-}

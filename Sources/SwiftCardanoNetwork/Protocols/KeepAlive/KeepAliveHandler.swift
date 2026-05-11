@@ -91,7 +91,7 @@ public struct KeepAliveHandler: Sendable {
                     return try s.afterReceive(msg)
                 }
             } onTimeout: {
-                let elapsed = start.distance(to: .now()).nanoseconds
+                let elapsed = DispatchTime.nanosecondsSince(start)
                 logger.error("KeepAlive: timeout", metadata: [
                     "cookie":  "\(sentCookie)",
                     "elapsedNs": "\(elapsed)"
@@ -111,8 +111,7 @@ public struct KeepAliveHandler: Sendable {
                 throw KeepAliveError.cookieMismatch(sent: sentCookie, received: receivedCookie)
             }
 
-            let elapsed = start.distance(to: .now())
-            let elapsedNs = elapsed.nanoseconds
+            let elapsedNs = DispatchTime.nanosecondsSince(start)
 
             logger.debug("KeepAlive: response received", metadata: [
                 "cookie":    "\(sentCookie)",
@@ -166,17 +165,3 @@ public struct KeepAliveHandler: Sendable {
     }
 }
 
-// MARK: - DispatchTimeInterval helpers
-
-private extension DispatchTimeInterval {
-    var nanoseconds: Int64 {
-        switch self {
-        case .nanoseconds(let n):  return Int64(n)
-        case .microseconds(let n): return Int64(n) * 1_000
-        case .milliseconds(let n): return Int64(n) * 1_000_000
-        case .seconds(let n):      return Int64(n) * 1_000_000_000
-        case .never:               return 0
-        @unknown default:          return 0
-        }
-    }
-}

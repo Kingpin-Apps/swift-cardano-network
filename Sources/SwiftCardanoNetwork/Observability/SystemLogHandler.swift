@@ -75,12 +75,16 @@ import Logging
 // MARK: - POSIX syslog (Linux / systemd)
 
 #if os(Linux)
-    import Glibc
+    import Foundation
 
-    /// A ``LogHandler`` that routes messages to the POSIX `syslog` facility.
+    /// A ``LogHandler`` that emits lines to stderr with a systemd-recognised priority prefix.
     ///
-    /// On systems running **systemd**, `systemd-journald` captures syslog entries and
-    /// makes them queryable via:
+    /// `systemd-journald` parses leading `<N>` (where `N` is a syslog priority 0–7) on
+    /// stderr/stdout from any service it supervises, so log entries appear in the journal
+    /// with the correct priority — same UX as raw `syslog(3)` without needing C variadic
+    /// interop (which Swift cannot import from Glibc).
+    ///
+    /// Query the journal via:
     ///
     /// ```
     /// journalctl -t <process-name>          # filter by process
@@ -88,19 +92,19 @@ import Logging
     /// journalctl -f                         # follow in real time
     /// ```
     ///
-    /// The IDENTIFIER shown in the journal is the process name unless you call
-    /// `openlog(3)` yourself before creating the first logger.
+    /// The IDENTIFIER shown in the journal is the systemd unit name (when supervised)
+    /// or the process name. Outside of systemd, the `<N>` prefix is harmless extra text.
     ///
     /// Swift log levels map to syslog priorities as follows:
     ///
-    /// | swift-log       | syslog priority |
-    /// |-----------------|-----------------|
-    /// | trace / debug   | `LOG_DEBUG`     |
-    /// | info            | `LOG_INFO`      |
-    /// | notice          | `LOG_NOTICE`    |
-    /// | warning         | `LOG_WARNING`   |
-    /// | error           | `LOG_ERR`       |
-    /// | critical        | `LOG_CRIT`      |
+    /// | swift-log       | syslog priority | numeric |
+    /// |-----------------|-----------------|---------|
+    /// | trace / debug   | `LOG_DEBUG`     | 7       |
+    /// | info            | `LOG_INFO`      | 6       |
+    /// | notice          | `LOG_NOTICE`    | 5       |
+    /// | warning         | `LOG_WARNING`   | 4       |
+    /// | error           | `LOG_ERR`       | 3       |
+    /// | critical        | `LOG_CRIT`      | 2       |
     public struct SyslogHandler: LogHandler, @unchecked Sendable {
         public var metadata: Logger.Metadata = [:]
         public var logLevel: Logger.Level = .info
@@ -117,8 +121,8 @@ import Logging
             let merged = metadata.merging(event.metadata ?? [:]) { _, new in new }
             var msg = "[\(label)] \(event.message)"
             if !merged.isEmpty { msg += " \(merged)" }
-            // Use withCString to avoid format-string injection with user-supplied content.
-            msg.withCString { ptr in syslog(priority, "%s", ptr) }
+            let line = "<\(priority)>\(msg)\n"
+            try? FileHandle.standardError.write(contentsOf: Data(line.utf8))
         }
 
         public subscript(metadataKey key: String) -> Logger.Metadata.Value? {
@@ -126,14 +130,15 @@ import Logging
             set { metadata[key] = newValue }
         }
 
-        private func syslogPriority(for level: Logger.Level) -> Int32 {
+        // Numeric POSIX syslog priorities — stable values, see <syslog.h>.
+        private func syslogPriority(for level: Logger.Level) -> Int {
             switch level {
-            case .trace, .debug: return LOG_DEBUG
-            case .info: return LOG_INFO
-            case .notice: return LOG_NOTICE
-            case .warning: return LOG_WARNING
-            case .error: return LOG_ERR
-            case .critical: return LOG_CRIT
+            case .trace, .debug: return 7  // LOG_DEBUG
+            case .info:          return 6  // LOG_INFO
+            case .notice:        return 5  // LOG_NOTICE
+            case .warning:       return 4  // LOG_WARNING
+            case .error:         return 3  // LOG_ERR
+            case .critical:      return 2  // LOG_CRIT
             }
         }
     }

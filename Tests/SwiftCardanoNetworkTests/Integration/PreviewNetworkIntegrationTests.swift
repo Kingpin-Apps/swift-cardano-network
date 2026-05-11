@@ -1,4 +1,10 @@
+#if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#endif
 import NIOCore
 import NIOPosix
 import Testing
@@ -11,9 +17,20 @@ import Testing
 /// Returns `true` only if `cardano-node` is listening on 127.0.0.1:3001.
 /// Used as the `.enabled(if:)` guard for the entire preview-network suite.
 private func previewNodeReachable(host: String = "127.0.0.1", port: UInt16 = 3001) -> Bool {
+    // SOCK_STREAM is Int32 on Darwin, __socket_type on Glibc — normalise.
+    #if canImport(Darwin)
     let sock = socket(AF_INET, SOCK_STREAM, 0)
+    #else
+    let sock = socket(AF_INET, Int32(SOCK_STREAM.rawValue), 0)
+    #endif
     guard sock >= 0 else { return false }
-    defer { Darwin.close(sock) }
+    defer {
+        #if canImport(Darwin)
+        Darwin.close(sock)
+        #else
+        close(sock)
+        #endif
+    }
 
     // 1-second send/receive timeout so the probe never blocks the test suite.
     var tv = timeval(tv_sec: 1, tv_usec: 0)
@@ -27,7 +44,11 @@ private func previewNodeReachable(host: String = "127.0.0.1", port: UInt16 = 300
 
     return withUnsafePointer(to: &addr) {
         $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-            Darwin.connect(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.stride)) == 0
+            #if canImport(Darwin)
+            return Darwin.connect(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.stride)) == 0
+            #else
+            return connect(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.stride)) == 0
+            #endif
         }
     }
 }

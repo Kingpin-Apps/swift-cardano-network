@@ -3,6 +3,13 @@ import NIOCore
 import NIOPosix
 import SwiftCardanoCore
 import Testing
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#endif
 
 @testable import SwiftCardanoNetwork
 
@@ -212,21 +219,33 @@ struct NodeToClientConnectionTypedTests {
 private func previewSocketReachable(path: String) -> Bool {
     guard FileManager.default.fileExists(atPath: path) else { return false }
     // Verify the node is actually running by attempting a brief connection.
+    #if canImport(Darwin)
     let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+    #else
+    let fd = socket(AF_UNIX, Int32(SOCK_STREAM.rawValue), 0)
+    #endif
     guard fd >= 0 else { return false }
     defer { close(fd) }
     var addr = sockaddr_un()
     addr.sun_family = sa_family_t(AF_UNIX)
-    // Phase 1: write path into sun_path (exclusive borrow of addr.sun_path ends here)
+    // Phase 1: write path into sun_path (exclusive borrow of addr.sun_path ends here).
+    // strlcpy is BSD-only — use a bounded manual copy that works on every libc.
     withUnsafeMutableBytes(of: &addr.sun_path) { buf in
+        let dst = buf.baseAddress!.assumingMemoryBound(to: CChar.self)
         path.withCString { cstr in
-            _ = strlcpy(buf.baseAddress!.assumingMemoryBound(to: CChar.self), cstr, buf.count)
+            let max = buf.count - 1
+            var i = 0
+            while i < max && cstr[i] != 0 {
+                dst[i] = cstr[i]
+                i += 1
+            }
+            dst[i] = 0
         }
     }
     // Phase 2: connect (shared borrow of addr)
     let result = withUnsafePointer(to: &addr) { ptr in
         ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockPtr in
-            Darwin.connect(fd, sockPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
+            connect(fd, sockPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
         }
     }
     return result == 0

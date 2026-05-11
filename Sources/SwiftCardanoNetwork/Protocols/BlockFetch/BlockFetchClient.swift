@@ -104,7 +104,6 @@ public struct BlockFetchClient: Sendable {
                 blocks.append(body)
 
             case .batchDone:
-                let elapsed = start.distance(to: .now())
                 logger.info("BlockFetch: batch complete", metadata: [
                     "blockCount": "\(blocks.count)",
                     "from": "\(startPoint)",
@@ -115,7 +114,7 @@ public struct BlockFetchClient: Sendable {
                     .increment(by: blocks.count)
                 CardanoMetrics
                     .timer(CardanoMetrics.blockFetchDurationSeconds)
-                    .recordNanoseconds(elapsed.nanoseconds)
+                    .recordNanoseconds(DispatchTime.nanosecondsSince(start))
                 return blocks
 
             default:
@@ -144,17 +143,3 @@ public struct BlockFetchClient: Sendable {
     }
 }
 
-// MARK: - DispatchTimeInterval helpers
-
-private extension DispatchTimeInterval {
-    var nanoseconds: Int64 {
-        switch self {
-        case .nanoseconds(let n):  return Int64(n)
-        case .microseconds(let n): return Int64(n) * 1_000
-        case .milliseconds(let n): return Int64(n) * 1_000_000
-        case .seconds(let n):      return Int64(n) * 1_000_000_000
-        case .never:               return 0
-        @unknown default:          return 0
-        }
-    }
-}

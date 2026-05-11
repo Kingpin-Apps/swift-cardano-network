@@ -105,8 +105,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-cardano-core",
       "state" : {
-        "revision" : "95aa7b5363014ec99e482982fdad601b6b7d3dc8",
-        "version" : "0.3.16"
+        "revision" : "251640c5b37e27c1be3745363d15821a9fe0971a",
+        "version" : "0.3.19"
       }
     },
     {
