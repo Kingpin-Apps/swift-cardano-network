@@ -28,7 +28,7 @@ public struct DRepStakeEntry: Serializable {
     }
 
     public func toPrimitive() throws -> Primitive {
-        .list([try drep.toPrimitive(), .uint(UInt(stake))])
+        .list([try drep.toPrimitive(), .uint(UInt64(stake))])
     }
 
     public static func == (lhs: DRepStakeEntry, rhs: DRepStakeEntry) -> Bool {
@@ -71,7 +71,7 @@ public struct DRepStakeDistribution: Serializable {
         var pairs: [(Primitive, Primitive)] = []
         for entry in entries {
             let key = try entry.drep.toPrimitive()
-            pairs.append((key, .uint(UInt(entry.stake))))
+            pairs.append((key, .uint(UInt64(entry.stake))))
         }
         return .frozenDict(Dictionary(uniqueKeysWithValues: pairs))
     }

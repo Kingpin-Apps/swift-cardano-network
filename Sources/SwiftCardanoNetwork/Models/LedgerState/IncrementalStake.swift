@@ -100,11 +100,11 @@ public struct IncrementalStake: Serializable {
     public func toPrimitive() throws -> Primitive {
         var credPairs: [(Primitive, Primitive)] = []
         for entry in credentials {
-            credPairs.append((try entry.credential.toPrimitive(), .uint(UInt(entry.lovelace))))
+            credPairs.append((try entry.credential.toPrimitive(), .uint(UInt64(entry.lovelace))))
         }
         var ptrPairs: [(Primitive, Primitive)] = []
         for entry in pointers {
-            ptrPairs.append((entry.pointer.toPrimitive(), .uint(UInt(entry.lovelace))))
+            ptrPairs.append((entry.pointer.toPrimitive(), .uint(UInt64(entry.lovelace))))
         }
         return .list([
             .frozenDict(Dictionary(uniqueKeysWithValues: credPairs)),

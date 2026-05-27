@@ -87,10 +87,10 @@ public struct NonMyopicMemberRewards: Serializable {
         for entry in entries {
             let keyPrim: Primitive
             switch entry.input {
-            case .coin(let v): keyPrim = .uint(UInt(v))
+            case .coin(let v): keyPrim = .uint(UInt64(v))
             case .credential(let c): keyPrim = try c.toPrimitive()
             }
-            pairs.append((keyPrim, .uint(UInt(entry.rewards))))
+            pairs.append((keyPrim, .uint(UInt64(entry.rewards))))
         }
         return .frozenDict(Dictionary(uniqueKeysWithValues: pairs))
     }

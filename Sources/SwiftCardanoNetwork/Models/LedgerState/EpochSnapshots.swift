@@ -77,14 +77,14 @@ public struct EpochSnapshots: Serializable {
                 try poolDistr.toPrimitive(),
                 try stakeSet.toPrimitive(),
                 try stakeGo.toPrimitive(),
-                .uint(UInt(fee)),
+                .uint(UInt64(fee)),
             ])
         }
         return .list([
             try stakeMark.toPrimitive(),
             try stakeSet.toPrimitive(),
             try stakeGo.toPrimitive(),
-            .uint(UInt(fee)),
+            .uint(UInt64(fee)),
         ])
     }
 

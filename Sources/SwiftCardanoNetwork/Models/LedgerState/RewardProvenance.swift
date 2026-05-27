@@ -69,16 +69,16 @@ public struct PoolRewardInfo: Serializable {
             paramsPrimitive = rawPoolParams
         }
         return .list([
-            .uint(UInt(poolBlocks)),
+            .uint(UInt64(poolBlocks)),
             try sigma.toPrimitive(),
             try sigmaApparent.toPrimitive(),
-            .uint(UInt(ownerStake)),
+            .uint(UInt64(ownerStake)),
             paramsPrimitive,
             try pledgeRatio.toPrimitive(),
-            .uint(UInt(maxReward)),
+            .uint(UInt64(maxReward)),
             try apparentPerformance.toPrimitive(),
-            .uint(UInt(poolRewardPot)),
-            .uint(UInt(leaderReward)),
+            .uint(UInt64(poolRewardPot)),
+            .uint(UInt64(leaderReward)),
         ])
     }
 
@@ -94,7 +94,7 @@ public struct PoolRewardInfo: Serializable {
 
     private static func readFraction(_ prim: Primitive, label: String) throws -> Fraction {
         if case .unitInterval(let ui) = prim {
-            return Fraction(numerator: Int(ui.numerator), denominator: Int(ui.denominator))
+            return Fraction(numerator: Int64(ui.numerator), denominator: Int64(ui.denominator))
         }
         if case .cborTag(let tag) = prim, tag.tag == 30,
            case .list(let elems) = tag.value, elems.count == 2 {
@@ -113,10 +113,10 @@ public struct PoolRewardInfo: Serializable {
             "PoolRewardInfo: expected rational for \(label), got \(prim)")
     }
 
-    private static func readInt(_ prim: Primitive, label: String) throws -> Int {
+    private static func readInt(_ prim: Primitive, label: String) throws -> Int64 {
         switch prim {
         case .int(let v): return v
-        case .uint(let v): return Int(v)
+        case .uint(let v): return Int64(v)
         default:
             throw LedgerStateDecodingError.unexpectedFormat(
                 "PoolRewardInfo: expected integer for \(label)")
@@ -248,7 +248,7 @@ public struct RewardProvenance: Serializable {
     public func toPrimitive() throws -> Primitive {
         var blocksPairs: [(Primitive, Primitive)] = []
         for (k, v) in blocksPerPool {
-            blocksPairs.append((.bytes(k), .uint(UInt(v))))
+            blocksPairs.append((.bytes(k), .uint(UInt64(v))))
         }
         var poolsPairs: [(Primitive, Primitive)] = []
         for (k, v) in pools {
@@ -259,20 +259,20 @@ public struct RewardProvenance: Serializable {
             desirePairs.append((.bytes(k), .float(v)))
         }
         return .list([
-            .uint(UInt(slotsPerEpoch)),
+            .uint(UInt64(slotsPerEpoch)),
             .frozenDict(Dictionary(uniqueKeysWithValues: blocksPairs)),
-            .uint(UInt(maxBlockBodySize)),
-            .uint(UInt(maxBlockHeaderSize)),
-            .uint(UInt(maxLovelaceSupply)),
-            .uint(UInt(activeStake)),
-            .uint(UInt(totalStake)),
-            .uint(UInt(totalBlocks)),
+            .uint(UInt64(maxBlockBodySize)),
+            .uint(UInt64(maxBlockHeaderSize)),
+            .uint(UInt64(maxLovelaceSupply)),
+            .uint(UInt64(activeStake)),
+            .uint(UInt64(totalStake)),
+            .uint(UInt64(totalBlocks)),
             try decentralisation.toPrimitive(),
-            .uint(UInt(expectedBlocks)),
+            .uint(UInt64(expectedBlocks)),
             try eta.toPrimitive(),
-            .uint(UInt(rewardPot)),
-            .uint(UInt(deltaR1)),
-            .uint(UInt(deltaR2)),
+            .uint(UInt64(rewardPot)),
+            .uint(UInt64(deltaR1)),
+            .uint(UInt64(deltaR2)),
             .frozenDict(Dictionary(uniqueKeysWithValues: poolsPairs)),
             .frozenDict(Dictionary(uniqueKeysWithValues: desirePairs)),
         ])
@@ -383,7 +383,7 @@ public struct RewardProvenance: Serializable {
 
     private static func readFraction(_ prim: Primitive, label: String) throws -> Fraction {
         if case .unitInterval(let ui) = prim {
-            return Fraction(numerator: Int(ui.numerator), denominator: Int(ui.denominator))
+            return Fraction(numerator: Int64(ui.numerator), denominator: Int64(ui.denominator))
         }
         if case .cborTag(let tag) = prim, tag.tag == 30,
            case .list(let elems) = tag.value, elems.count == 2 {
@@ -402,10 +402,10 @@ public struct RewardProvenance: Serializable {
             "RewardProvenance: expected rational for \(label), got \(prim)")
     }
 
-    private static func readInt(_ prim: Primitive, label: String) throws -> Int {
+    private static func readInt(_ prim: Primitive, label: String) throws -> Int64 {
         switch prim {
         case .int(let v): return v
-        case .uint(let v): return Int(v)
+        case .uint(let v): return Int64(v)
         default:
             throw LedgerStateDecodingError.unexpectedFormat(
                 "RewardProvenance: expected integer for \(label)")

@@ -126,7 +126,7 @@ public struct ChainDepState: Serializable {
         var elems: [Primitive] = []
         // WithOrigin SlotNo: Origin = [0], At slot = [1, slot]
         if let slot = lastSlot {
-            elems.append(.list([.uint(1), .uint(UInt(slot))]))
+            elems.append(.list([.uint(1), .uint(UInt64(slot))]))
         } else {
             elems.append(.list([.uint(0)]))
         }
@@ -284,7 +284,7 @@ public struct ChainDepState: Serializable {
         var dict: [(Primitive, Primitive)] = []
         dict.reserveCapacity(m.count)
         for (k, v) in m {
-            dict.append((try k.toPrimitive(), .uint(UInt(v))))
+            dict.append((try k.toPrimitive(), .uint(UInt64(v))))
         }
         return .frozenDict(Dictionary(uniqueKeysWithValues: dict))
     }

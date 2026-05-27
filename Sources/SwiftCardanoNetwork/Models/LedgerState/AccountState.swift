@@ -22,7 +22,7 @@ public struct AccountState: Serializable {
     }
 
     public func toPrimitive() throws -> Primitive {
-        .list([.uint(UInt(treasury)), .uint(UInt(reserves))])
+        .list([.uint(UInt64(treasury)), .uint(UInt64(reserves))])
     }
 
     private static func uint(from p: Primitive) throws -> UInt64 {

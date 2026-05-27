@@ -41,7 +41,7 @@ public struct NonMyopicState: Serializable {
         let likelDict: Primitive = pairs.isEmpty
             ? .dict([:])
             : .frozenDict(Dictionary(uniqueKeysWithValues: pairs))
-        return .list([likelDict, .uint(UInt(rewardPot))])
+        return .list([likelDict, .uint(UInt64(rewardPot))])
     }
 
     private static func decodeLikelihoods(_ p: Primitive) throws -> [Data: [Double]] {

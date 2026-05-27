@@ -29,13 +29,13 @@ public struct SnapshotStakeEntry: Serializable {
     }
 
     public func toPrimitive() throws -> Primitive {
-        .list([try credential.toPrimitive(), .uint(UInt(lovelace))])
+        .list([try credential.toPrimitive(), .uint(UInt64(lovelace))])
     }
 
     public func toDict() throws -> Primitive {
         var dict = OrderedDictionary<Primitive, Primitive>()
         dict[.string("credential")] = try credential.toPrimitive()
-        dict[.string("lovelace")]   = .uint(UInt(lovelace))
+        dict[.string("lovelace")]   = .uint(UInt64(lovelace))
         return .orderedDict(dict)
     }
 
@@ -185,7 +185,7 @@ public struct StakeSnapshot: Serializable {
     public func toPrimitive() throws -> Primitive {
         var stakePairs: [(Primitive, Primitive)] = []
         for entry in stake {
-            stakePairs.append((try entry.credential.toPrimitive(), .uint(UInt(entry.lovelace))))
+            stakePairs.append((try entry.credential.toPrimitive(), .uint(UInt64(entry.lovelace))))
         }
         var delegPairs: [(Primitive, Primitive)] = []
         for entry in delegations {

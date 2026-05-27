@@ -75,13 +75,13 @@ public struct RewardAccountEntry: Serializable {
     }
 
     public func toPrimitive() throws -> Primitive {
-        .list([try credential.toPrimitive(), .uint(UInt(lovelace))])
+        .list([try credential.toPrimitive(), .uint(UInt64(lovelace))])
     }
 
     public func toDict() throws -> Primitive {
         var dict = OrderedDictionary<Primitive, Primitive>()
         dict[.string("credential")] = try credential.toPrimitive()
-        dict[.string("lovelace")]   = .uint(UInt(lovelace))
+        dict[.string("lovelace")]   = .uint(UInt64(lovelace))
         return .orderedDict(dict)
     }
 
@@ -167,7 +167,7 @@ public struct FilteredDelegationsAndRewards: Serializable {
         }
         let rewardPairs = try rewardAccounts.map { entry -> (Primitive, Primitive) in
             let key = try entry.credential.toPrimitive()
-            return (key, .uint(UInt(entry.lovelace)))
+            return (key, .uint(UInt64(entry.lovelace)))
         }
         let delegMap = Primitive.frozenDict(Dictionary(uniqueKeysWithValues: delegPairs))
         let rewardMap = Primitive.frozenDict(Dictionary(uniqueKeysWithValues: rewardPairs))

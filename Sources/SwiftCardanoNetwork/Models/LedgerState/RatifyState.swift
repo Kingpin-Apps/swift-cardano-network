@@ -43,7 +43,7 @@ public struct EnactCommittee: Serializable {
     public func toPrimitive() throws -> Primitive {
         var pairs: [(Primitive, Primitive)] = []
         for m in members {
-            pairs.append((try m.coldCred.toPrimitive(), .uint(UInt(m.expiryEpoch))))
+            pairs.append((try m.coldCred.toPrimitive(), .uint(UInt64(m.expiryEpoch))))
         }
         return .list([
             .dict(Dictionary(uniqueKeysWithValues: pairs)),
@@ -118,7 +118,7 @@ public struct TreasuryWithdrawal: Serializable {
     }
 
     public func toPrimitive() throws -> Primitive {
-        .list([try credential.toPrimitive(), .uint(UInt(coin))])
+        .list([try credential.toPrimitive(), .uint(UInt64(coin))])
     }
 }
 
@@ -155,14 +155,14 @@ public struct EnactState: Serializable {
     public func toPrimitive() throws -> Primitive {
         var wdPairs: [(Primitive, Primitive)] = []
         for w in withdrawals {
-            wdPairs.append((try w.credential.toPrimitive(), .uint(UInt(w.coin))))
+            wdPairs.append((try w.credential.toPrimitive(), .uint(UInt64(w.coin))))
         }
         return .list([
             try EnactCommittee.toStrictMaybe(committee),
             try constitution.toPrimitive(),
             try currentPParams.toPrimitive(),
             try prevPParams.toPrimitive(),
-            .uint(UInt(treasury)),
+            .uint(UInt64(treasury)),
             .dict(Dictionary(uniqueKeysWithValues: wdPairs)),
             try prevGovActionIds.toPrimitive(),
         ])

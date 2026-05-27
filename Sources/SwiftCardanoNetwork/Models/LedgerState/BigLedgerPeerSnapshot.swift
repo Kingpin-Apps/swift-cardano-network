@@ -106,10 +106,10 @@ public struct BigLedgerPeerSnapshot: Serializable {
             throw LedgerStateDecodingError.unexpectedFormat(
                 "BigLedgerPeerSnapshot: expected list[2+], got \(primitive)")
         }
-        let snapshotVersion: UInt
+        let snapshotVersion: UInt64
         switch top[0] {
         case .uint(let u): snapshotVersion = u
-        case .int(let i) where i >= 0: snapshotVersion = UInt(i)
+        case .int(let i) where i >= 0: snapshotVersion = UInt64(i)
         default:
             throw LedgerStateDecodingError.unexpectedFormat(
                 "BigLedgerPeerSnapshot: expected uint snapshot version, got \(top[0])")
@@ -215,7 +215,7 @@ public struct BigLedgerPeerSnapshot: Serializable {
 
     private static func encodeWithOriginSlot(_ slot: UInt64?) -> Primitive {
         guard let slot else { return .list([.uint(0)]) }
-        return .list([.uint(1), .uint(UInt(slot))])
+        return .list([.uint(1), .uint(UInt64(slot))])
     }
 
     // MARK: - Peers
@@ -300,10 +300,10 @@ public struct BigLedgerPeerSnapshot: Serializable {
             throw LedgerStateDecodingError.unexpectedFormat(
                 "BigLedgerPeerSnapshot: expected uint port in relay, got \(f[1])")
         }
-        let relayType: UInt
+        let relayType: UInt64
         switch f[0] {
         case .uint(let u): relayType = u
-        case .int(let i) where i >= 0: relayType = UInt(i)
+        case .int(let i) where i >= 0: relayType = UInt64(i)
         default:
             throw LedgerStateDecodingError.unexpectedFormat(
                 "BigLedgerPeerSnapshot: expected uint relay type, got \(f[0])")
@@ -312,7 +312,7 @@ public struct BigLedgerPeerSnapshot: Serializable {
         return LedgerPeerRelay(address: address, port: port)
     }
 
-    private static func addressFromPrimitive(_ p: Primitive, type relayType: UInt) throws -> String {
+    private static func addressFromPrimitive(_ p: Primitive, type relayType: UInt64) throws -> String {
         switch relayType {
         case 0:
             // DNS hostname stored as bytes (ASCII/UTF-8)
@@ -331,7 +331,7 @@ public struct BigLedgerPeerSnapshot: Serializable {
             }
         case 1:
             // IPv4 address: indefiniteList of 4 uint8 values
-            let octets: [UInt]
+            let octets: [UInt64]
             switch p {
             case .indefiniteList(let il):
                 octets = try Array(il).map {
@@ -342,7 +342,7 @@ public struct BigLedgerPeerSnapshot: Serializable {
                     return b
                 }
             case .bytes(let d) where d.count == 4:
-                octets = d.map { UInt($0) }
+                octets = d.map { UInt64($0) }
             default:
                 throw LedgerStateDecodingError.unexpectedFormat(
                     "BigLedgerPeerSnapshot: type-1 relay expected IPv4 data, got \(p)")
@@ -367,14 +367,14 @@ public struct BigLedgerPeerSnapshot: Serializable {
     }
 
     private static func encodePeer(_ peer: LedgerPeer) throws -> Primitive {
-        let accNum = UInt(peer.accumulatedRelativeStake.numerator)
-        let accDen = UInt(peer.accumulatedRelativeStake.denominator)
-        let poolNum = UInt(peer.relativeStake.numerator)
-        let poolDen = UInt(peer.relativeStake.denominator)
+        let accNum = UInt64(peer.accumulatedRelativeStake.numerator)
+        let accDen = UInt64(peer.accumulatedRelativeStake.denominator)
+        let poolNum = UInt64(peer.relativeStake.numerator)
+        let poolDen = UInt64(peer.relativeStake.denominator)
         let relaysPrim = Primitive.indefiniteList(IndefiniteList(peer.relays.map { relay in
             Primitive.list([
                 .uint(0),
-                .uint(UInt(relay.port)),
+                .uint(UInt64(relay.port)),
                 .bytes(Data(relay.address.utf8)),
             ])
         }))

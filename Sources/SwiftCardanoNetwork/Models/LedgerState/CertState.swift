@@ -31,7 +31,7 @@ public struct StakePointer: Sendable, Equatable, Hashable {
     }
 
     func toPrimitive() -> Primitive {
-        .list([.uint(UInt(slotNo)), .uint(UInt(txIndex)), .uint(UInt(certIndex))])
+        .list([.uint(UInt64(slotNo)), .uint(UInt64(txIndex)), .uint(UInt64(certIndex))])
     }
 
     private static func uint(_ p: Primitive, label: String) throws -> UInt64 {
@@ -106,8 +106,8 @@ public struct UMapEntry: Serializable {
     public func toPrimitive() throws -> Primitive {
         .list([
             try credential.toPrimitive(),
-            .uint(UInt(reward)),
-            .uint(UInt(deposit)),
+            .uint(UInt64(reward)),
+            .uint(UInt64(deposit)),
             (try poolOperator?.toPrimitive()) ?? .null,
             (try drep?.toPrimitive()) ?? .null,
         ])
@@ -116,8 +116,8 @@ public struct UMapEntry: Serializable {
     public func toDict() throws -> Primitive {
         var dict = OrderedDictionary<Primitive, Primitive>()
         dict[.string("credential")]   = try credential.toPrimitive()
-        dict[.string("reward")]       = .uint(UInt(reward))
-        dict[.string("deposit")]      = .uint(UInt(deposit))
+        dict[.string("reward")]       = .uint(UInt64(reward))
+        dict[.string("deposit")]      = .uint(UInt64(deposit))
         dict[.string("poolOperator")] = try poolOperator.map { try $0.toDict() } ?? .null
         dict[.string("drep")]         = try drep?.toPrimitive() ?? .null
         return .orderedDict(dict)
@@ -199,8 +199,8 @@ public struct DState: Serializable {
         for entry in accounts {
             let key = try entry.credential.toPrimitive()
             let value = Primitive.list([
-                entry.reward > 0 ? .uint(UInt(entry.reward)) : .null,
-                entry.deposit > 0 ? .uint(UInt(entry.deposit)) : .null,
+                entry.reward > 0 ? .uint(UInt64(entry.reward)) : .null,
+                entry.deposit > 0 ? .uint(UInt64(entry.deposit)) : .null,
                 (try entry.poolOperator?.toPrimitive()) ?? .null,
                 (try? entry.drep?.toPrimitive()) ?? .null,
             ])
@@ -358,10 +358,10 @@ public struct PState: Serializable {
             (try k.toPrimitive(), try v.toPrimitive())
         }
         let retPairs: [(Primitive, Primitive)] = try retiring.map {
-            (try $0.toPrimitive(), .uint(UInt($1)))
+            (try $0.toPrimitive(), .uint(UInt64($1)))
         }
         let depPairs: [(Primitive, Primitive)] = try deposits.map {
-            (try $0.toPrimitive(), .uint(UInt($1)))
+            (try $0.toPrimitive(), .uint(UInt64($1)))
         }
         let vrfPairs: [(Primitive, Primitive)] = try vrfKeyHashes.map {
             (try $0.toPrimitive(), $1.toPrimitive())
@@ -381,8 +381,8 @@ public struct PState: Serializable {
         var dict = OrderedDictionary<Primitive, Primitive>()
         dict[.string("stakePools")]       = try Self.poolDict(stakePools)       { try $0.toPrimitive() }
         dict[.string("futureStakePools")] = try Self.poolDict(futureStakePools) { try $0.toPrimitive() }
-        dict[.string("retiring")]         = try Self.poolDict(retiring)         { .uint(UInt($0)) }
-        dict[.string("deposits")]         = try Self.poolDict(deposits)         { .uint(UInt($0)) }
+        dict[.string("retiring")]         = try Self.poolDict(retiring)         { .uint(UInt64($0)) }
+        dict[.string("deposits")]         = try Self.poolDict(deposits)         { .uint(UInt64($0)) }
         dict[.string("vrfKeyHashes")]     = try Self.poolDict(vrfKeyHashes)     { try $0.toDict() }
         return .orderedDict(dict)
     }
@@ -587,7 +587,7 @@ public struct VState: Serializable {
         return .list([
             drepMap,
             .frozenDict(Dictionary(uniqueKeysWithValues: committeePairs)),
-            .uint(UInt(numDormantEpochs)),
+            .uint(UInt64(numDormantEpochs)),
         ])
     }
 

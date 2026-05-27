@@ -44,9 +44,9 @@ public struct DRepStateEntry: Serializable {
         let anchorPrim: Primitive = try anchor.map { try $0.toPrimitive() } ?? .null
         return .list([
             try drep.toPrimitive(),
-            .uint(UInt(expiry)),
+            .uint(UInt64(expiry)),
             anchorPrim,
-            .uint(UInt(deposit)),
+            .uint(UInt64(deposit)),
         ])
     }
 
@@ -108,7 +108,7 @@ public struct DRepState: Serializable {
             } else {
                 anchorPrim = .list([])
             }
-            let value = Primitive.list([.uint(UInt(entry.expiry)), anchorPrim, .uint(UInt(entry.deposit))])
+            let value = Primitive.list([.uint(UInt64(entry.expiry)), anchorPrim, .uint(UInt64(entry.deposit))])
             pairs.append((key, value))
         }
         return .frozenDict(Dictionary(uniqueKeysWithValues: pairs))

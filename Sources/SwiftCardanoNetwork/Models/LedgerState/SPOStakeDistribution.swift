@@ -29,13 +29,13 @@ public struct SPOStakeEntry: Serializable {
     }
 
     public func toPrimitive() throws -> Primitive {
-        .list([try poolOperator.toPrimitive(), .uint(UInt(stake))])
+        .list([try poolOperator.toPrimitive(), .uint(UInt64(stake))])
     }
 
     public func toDict() throws -> Primitive {
         var dict = OrderedDictionary<Primitive, Primitive>()
         dict[.string("poolOperator")] = try poolOperator.toDict()
-        dict[.string("stake")]        = .uint(UInt(stake))
+        dict[.string("stake")]        = .uint(UInt64(stake))
         return .orderedDict(dict)
     }
 }
@@ -69,7 +69,7 @@ public struct SPOStakeDistribution: Serializable {
     public func toPrimitive() throws -> Primitive {
         var pairs: [(Primitive, Primitive)] = []
         for entry in entries {
-            pairs.append((try entry.poolOperator.toPrimitive(), .uint(UInt(entry.stake))))
+            pairs.append((try entry.poolOperator.toPrimitive(), .uint(UInt64(entry.stake))))
         }
         return .frozenDict(Dictionary(uniqueKeysWithValues: pairs))
     }

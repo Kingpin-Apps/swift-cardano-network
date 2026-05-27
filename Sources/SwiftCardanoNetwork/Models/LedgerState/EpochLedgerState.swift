@@ -131,11 +131,11 @@ public struct EpochLedgerState: Serializable {
         }
         let utxoState = Primitive.list([
             rawUtxo,
-            .uint(UInt(deposited)),
-            .uint(UInt(fees)),
+            .uint(UInt64(deposited)),
+            .uint(UInt64(fees)),
             try govState?.toPrimitive() ?? .list([]),
             try stakeDistr?.toPrimitive() ?? .list([]),
-            .uint(UInt(donation)),
+            .uint(UInt64(donation)),
         ])
         return .list([utxoState, certPrimitive])
     }

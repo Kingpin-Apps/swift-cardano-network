@@ -131,7 +131,7 @@ public enum MemberStatus: UInt64, Serializable {
     }
 
     public func toPrimitive() throws -> Primitive {
-        .uint(UInt(rawValue))
+        .uint(UInt64(rawValue))
     }
 }
 
@@ -187,7 +187,7 @@ public enum NextEpochChange: Serializable {
         switch self {
         case .noChangeExpiration:     return .list([.uint(0)])
         case .noChangeTermExpiration: return .list([.uint(1)])
-        case .termAdjusted(let e):   return .list([.uint(2), .uint(UInt(e))])
+        case .termAdjusted(let e):   return .list([.uint(2), .uint(UInt64(e))])
         case .memberNotFound:         return .list([.uint(3)])
         }
     }
@@ -240,7 +240,7 @@ public struct CommitteeMemberState: Serializable {
     }
 
     public func toPrimitive() throws -> Primitive {
-        let expiryPrim: Primitive = termExpiry.map { .list([.uint(UInt($0))]) } ?? .list([])
+        let expiryPrim: Primitive = termExpiry.map { .list([.uint(UInt64($0))]) } ?? .list([])
         return .list([
             try hotCredentialStatus.toPrimitive(),
             try memberStatus.toPrimitive(),
@@ -352,7 +352,7 @@ public struct CommitteeMembersState: Serializable {
     private static func parseStrictMaybeFraction(_ prim: Primitive, label: String) throws -> Fraction? {
         guard case .list(let items) = prim, let first = items.first else { return nil }
         if case .unitInterval(let ui) = first {
-            return Fraction(numerator: Int(ui.numerator), denominator: Int(ui.denominator))
+            return Fraction(numerator: Int64(ui.numerator), denominator: Int64(ui.denominator))
         }
         if case .cborTag(let tag) = first, tag.tag == 30, case .list(let elems) = tag.value, elems.count == 2 {
             return Fraction(
@@ -369,10 +369,10 @@ public struct CommitteeMembersState: Serializable {
         throw LedgerStateDecodingError.unexpectedFormat("CommitteeMembersState: expected rational for \(label), got \(first)")
     }
 
-    private static func readInt(_ prim: Primitive, label: String) throws -> Int {
+    private static func readInt(_ prim: Primitive, label: String) throws -> Int64 {
         switch prim {
         case .int(let v): return v
-        case .uint(let v): return Int(v)
+        case .uint(let v): return Int64(v)
         default:
             throw LedgerStateDecodingError.unexpectedFormat("CommitteeMembersState: expected integer for \(label)")
         }
@@ -391,7 +391,7 @@ public struct CommitteeMembersState: Serializable {
         return .list([
             .frozenDict(Dictionary(uniqueKeysWithValues: memberPairs)),
             thresholdPrim,
-            .uint(UInt(currentEpoch)),
+            .uint(UInt64(currentEpoch)),
         ])
     }
 

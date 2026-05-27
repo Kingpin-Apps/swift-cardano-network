@@ -1,6 +1,5 @@
 import Foundation
 import NIOCore
-import PotentCBOR
 import SwiftCardanoCore
 
 // MARK: - Header NtN wire decoding

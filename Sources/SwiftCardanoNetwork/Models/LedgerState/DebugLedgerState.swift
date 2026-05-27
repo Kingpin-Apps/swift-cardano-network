@@ -137,7 +137,7 @@ public struct DebugLedgerState: Serializable {
             rewUpdatePrim = .list([])
         }
         return .list([
-            .uint(UInt(epochNo)),
+            .uint(UInt64(epochNo)),
             try Self.encodeBlocksMade(blocksMadePrev),
             try Self.encodeBlocksMade(blocksMadeCurr),
             try epochState.toPrimitive(),
@@ -154,7 +154,7 @@ public struct DebugLedgerState: Serializable {
     /// stays a labeled JSON object like the other typed query results.
     public func toDict() throws -> Primitive {
         var dict = OrderedDictionary<Primitive, Primitive>()
-        dict[.string("epochNo")]          = .uint(UInt(epochNo))
+        dict[.string("epochNo")]          = .uint(UInt64(epochNo))
         dict[.string("blocksMadePrev")]   = try Self.encodeBlocksMade(blocksMadePrev)
         dict[.string("blocksMadeCurr")]   = try Self.encodeBlocksMade(blocksMadeCurr)
         dict[.string("epochState")]       = try epochState.toDict()
@@ -223,7 +223,7 @@ public struct DebugLedgerState: Serializable {
         var dict: [(Primitive, Primitive)] = []
         dict.reserveCapacity(m.count)
         for (k, v) in m {
-            dict.append((.bytes(k), .uint(UInt(v))))
+            dict.append((.bytes(k), .uint(UInt64(v))))
         }
         return .frozenDict(Dictionary(uniqueKeysWithValues: dict))
     }

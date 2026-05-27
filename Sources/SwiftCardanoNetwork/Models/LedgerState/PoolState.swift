@@ -58,9 +58,9 @@ public struct PoolStateEntry: Serializable {
             try poolOperator.toPrimitive(),
             try poolParams.toPrimitive(),
             (try futurePoolParams?.toPrimitive()) ?? .null,
-            .uint(UInt(deposit)),
+            .uint(UInt64(deposit)),
         ]
-        if let r = retiring { out.append(.uint(UInt(r))) }
+        if let r = retiring { out.append(.uint(UInt64(r))) }
         return .list(out)
     }
 
@@ -71,8 +71,8 @@ public struct PoolStateEntry: Serializable {
         if let f = futurePoolParams {
             dict[.string("futurePoolParams")] = try f.toPrimitive()
         }
-        dict[.string("deposit")] = .uint(UInt(deposit))
-        if let r = retiring { dict[.string("retiring")] = .uint(UInt(r)) }
+        dict[.string("deposit")] = .uint(UInt64(deposit))
+        if let r = retiring { dict[.string("retiring")] = .uint(UInt64(r)) }
         return .orderedDict(dict)
     }
 }
@@ -161,9 +161,9 @@ public struct PoolState: Serializable {
                 future.append((key, try f.toPrimitive()))
             }
             if let r = entry.retiring {
-                retiring.append((key, .uint(UInt(r))))
+                retiring.append((key, .uint(UInt64(r))))
             }
-            deposits.append((key, .uint(UInt(entry.deposit))))
+            deposits.append((key, .uint(UInt64(entry.deposit))))
         }
         return .list([
             .frozenDict(Dictionary(uniqueKeysWithValues: current)),

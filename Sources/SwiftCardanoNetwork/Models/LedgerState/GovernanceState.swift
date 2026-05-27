@@ -162,7 +162,7 @@ public struct CommitteeVote: Serializable {
     }
 
     public func toPrimitive() throws -> Primitive {
-        .list([try credential.toPrimitive(), .uint(UInt(vote.rawValue))])
+        .list([try credential.toPrimitive(), .uint(UInt64(vote.rawValue))])
     }
 }
 
@@ -186,7 +186,7 @@ public struct DRepVote: Serializable {
     }
 
     public func toPrimitive() throws -> Primitive {
-        .list([try credential.toPrimitive(), .uint(UInt(vote.rawValue))])
+        .list([try credential.toPrimitive(), .uint(UInt64(vote.rawValue))])
     }
 }
 
@@ -210,7 +210,7 @@ public struct StakePoolVote: Serializable {
     }
 
     public func toPrimitive() throws -> Primitive {
-        .list([try poolOperator.toPrimitive(), .uint(UInt(vote.rawValue))])
+        .list([try poolOperator.toPrimitive(), .uint(UInt64(vote.rawValue))])
     }
 }
 
@@ -223,7 +223,7 @@ enum VoteHelpers {
             }
             return v
         case .int(let i):
-            guard let v = Vote(rawValue: i) else {
+            guard let v = Vote(rawValue: Int(i)) else {
                 throw LedgerStateDecodingError.unexpectedFormat("Vote: invalid rawValue \(i)")
             }
             return v
@@ -286,15 +286,15 @@ public struct GovernanceProposal: Serializable {
     public func toPrimitive() throws -> Primitive {
         var committeePairs: [(Primitive, Primitive)] = []
         for v in committeeVotes {
-            committeePairs.append((try v.credential.toPrimitive(), .uint(UInt(v.vote.rawValue))))
+            committeePairs.append((try v.credential.toPrimitive(), .uint(UInt64(v.vote.rawValue))))
         }
         var dRepPairs: [(Primitive, Primitive)] = []
         for v in dRepVotes {
-            dRepPairs.append((try v.credential.toPrimitive(), .uint(UInt(v.vote.rawValue))))
+            dRepPairs.append((try v.credential.toPrimitive(), .uint(UInt64(v.vote.rawValue))))
         }
         var spoPairs: [(Primitive, Primitive)] = []
         for v in stakePoolVotes {
-            spoPairs.append((try v.poolOperator.toPrimitive(), .uint(UInt(v.vote.rawValue))))
+            spoPairs.append((try v.poolOperator.toPrimitive(), .uint(UInt64(v.vote.rawValue))))
         }
         return .list([
             try govActionId.toPrimitive(),
@@ -302,8 +302,8 @@ public struct GovernanceProposal: Serializable {
             .dict(Dictionary(uniqueKeysWithValues: dRepPairs)),
             .dict(Dictionary(uniqueKeysWithValues: spoPairs)),
             try proposalProcedure.toPrimitive(),
-            .uint(UInt(proposedIn)),
-            .uint(UInt(expiresAfter)),
+            .uint(UInt64(proposedIn)),
+            .uint(UInt64(expiresAfter)),
         ])
     }
 
@@ -361,7 +361,7 @@ public struct CommitteeMemberEntry: Serializable {
     }
 
     public func toPrimitive() throws -> Primitive {
-        .list([try coldCred.toPrimitive(), .uint(UInt(expiryEpoch))])
+        .list([try coldCred.toPrimitive(), .uint(UInt64(expiryEpoch))])
     }
 }
 
@@ -407,7 +407,7 @@ public struct GovernanceCommitteeState: Serializable {
     public func toPrimitive() throws -> Primitive {
         var pairs: [(Primitive, Primitive)] = []
         for m in members {
-            pairs.append((try m.coldCred.toPrimitive(), .uint(UInt(m.expiryEpoch))))
+            pairs.append((try m.coldCred.toPrimitive(), .uint(UInt64(m.expiryEpoch))))
         }
         return .list([
             .dict(Dictionary(uniqueKeysWithValues: pairs)),
@@ -620,10 +620,10 @@ public enum FuturePParams: Serializable {
             throw LedgerStateDecodingError.unexpectedFormat(
                 "FuturePParams: expected non-empty list, got \(primitive)")
         }
-        let tag: UInt
+        let tag: UInt64
         switch f[0] {
         case .uint(let u): tag = u
-        case .int(let i) where i >= 0: tag = UInt(i)
+        case .int(let i) where i >= 0: tag = UInt64(i)
         default:
             throw LedgerStateDecodingError.unexpectedFormat(
                 "FuturePParams: expected uint tag, got \(f[0])")

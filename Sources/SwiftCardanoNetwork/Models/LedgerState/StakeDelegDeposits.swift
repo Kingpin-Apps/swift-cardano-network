@@ -57,7 +57,7 @@ public struct StakeDelegDeposits: Serializable {
         var pairs: [(Primitive, Primitive)] = []
         for entry in entries {
             let key = try entry.credential.toPrimitive()
-            pairs.append((key, .uint(UInt(entry.deposit))))
+            pairs.append((key, .uint(UInt64(entry.deposit))))
         }
         return .frozenDict(Dictionary(uniqueKeysWithValues: pairs))
     }

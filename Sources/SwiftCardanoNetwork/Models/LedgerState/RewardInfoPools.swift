@@ -131,19 +131,19 @@ public struct RewardInfoPools: Serializable {
     public func toPrimitive() throws -> Primitive {
         let g = globalInfo
         let globalPrim: Primitive = .list([
-            .uint(UInt(g.desiredNumberOfPools)),
+            .uint(UInt64(g.desiredNumberOfPools)),
             try g.poolInfluence.toPrimitive(),
-            .uint(UInt(g.totalRewardPot)),
-            .uint(UInt(g.totalStake)),
+            .uint(UInt64(g.totalRewardPot)),
+            .uint(UInt64(g.totalStake)),
         ])
 
         var poolPairs: [(Primitive, Primitive)] = []
         for p in pools {
             let poolPrim: Primitive = .list([
-                .uint(UInt(p.stake)),
-                .uint(UInt(p.ownerPledge)),
-                .uint(UInt(p.ownerStake)),
-                .uint(UInt(p.cost)),
+                .uint(UInt64(p.stake)),
+                .uint(UInt64(p.ownerPledge)),
+                .uint(UInt64(p.ownerStake)),
+                .uint(UInt64(p.cost)),
                 try p.margin.toPrimitive(),
                 .float(p.performanceEstimate),
             ])
@@ -183,7 +183,7 @@ public struct RewardInfoPools: Serializable {
     /// Decode a tag-30 rational that may surface as `.unitInterval`, `.cborTag(30)`, or a bare list.
     private static func readFraction(_ prim: Primitive, label: String) throws -> Fraction {
         if case .unitInterval(let ui) = prim {
-            return Fraction(numerator: Int(ui.numerator), denominator: Int(ui.denominator))
+            return Fraction(numerator: Int64(ui.numerator), denominator: Int64(ui.denominator))
         }
         if case .cborTag(let tag) = prim, tag.tag == 30, case .list(let elems) = tag.value, elems.count == 2 {
             return Fraction(
@@ -200,10 +200,10 @@ public struct RewardInfoPools: Serializable {
         throw LedgerStateDecodingError.unexpectedFormat("RewardInfoPools: expected rational for \(label), got \(prim)")
     }
 
-    private static func readInt(_ prim: Primitive, label: String) throws -> Int {
+    private static func readInt(_ prim: Primitive, label: String) throws -> Int64 {
         switch prim {
         case .int(let v): return v
-        case .uint(let v): return Int(v)
+        case .uint(let v): return Int64(v)
         default:
             throw LedgerStateDecodingError.unexpectedFormat("RewardInfoPools: expected integer for \(label)")
         }

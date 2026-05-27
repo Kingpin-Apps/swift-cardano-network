@@ -34,18 +34,18 @@ public struct PoolStakeSnapshotEntry: Serializable {
     public func toPrimitive() throws -> Primitive {
         .list([
             try poolOperator.toPrimitive(),
-            .uint(UInt(stakeMark)),
-            .uint(UInt(stakeSet)),
-            .uint(UInt(stakeGo)),
+            .uint(UInt64(stakeMark)),
+            .uint(UInt64(stakeSet)),
+            .uint(UInt64(stakeGo)),
         ])
     }
 
     public func toDict() throws -> Primitive {
         var dict = OrderedDictionary<Primitive, Primitive>()
         dict[.string("poolOperator")] = try poolOperator.toDict()
-        dict[.string("stakeMark")]    = .uint(UInt(stakeMark))
-        dict[.string("stakeSet")]     = .uint(UInt(stakeSet))
-        dict[.string("stakeGo")]      = .uint(UInt(stakeGo))
+        dict[.string("stakeMark")]    = .uint(UInt64(stakeMark))
+        dict[.string("stakeSet")]     = .uint(UInt64(stakeSet))
+        dict[.string("stakeGo")]      = .uint(UInt64(stakeGo))
         return .orderedDict(dict)
     }
 
@@ -120,17 +120,17 @@ public struct StakeSnapshots: Serializable {
         var poolPairs: [(Primitive, Primitive)] = []
         for entry in pools {
             let snapshot = Primitive.list([
-                .uint(UInt(entry.stakeMark)),
-                .uint(UInt(entry.stakeSet)),
-                .uint(UInt(entry.stakeGo)),
+                .uint(UInt64(entry.stakeMark)),
+                .uint(UInt64(entry.stakeSet)),
+                .uint(UInt64(entry.stakeGo)),
             ])
             poolPairs.append((try entry.poolOperator.toPrimitive(), snapshot))
         }
         return .list([
             .frozenDict(Dictionary(uniqueKeysWithValues: poolPairs)),
-            .uint(UInt(totalStakeMark)),
-            .uint(UInt(totalStakeSet)),
-            .uint(UInt(totalStakeGo)),
+            .uint(UInt64(totalStakeMark)),
+            .uint(UInt64(totalStakeSet)),
+            .uint(UInt64(totalStakeGo)),
         ])
     }
 
