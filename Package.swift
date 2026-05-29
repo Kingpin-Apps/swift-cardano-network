@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
 import PackageDescription
 
 let package = Package(
@@ -15,7 +15,7 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-nio-extras.git", from: "1.22.0"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.7.0"),
         .package(url: "https://github.com/apple/swift-metrics.git", from: "2.5.0"),
-        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-core", from: "0.4.0"),
+        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-core", from: "0.4.3"),
     ],
     targets: [
         .target(
