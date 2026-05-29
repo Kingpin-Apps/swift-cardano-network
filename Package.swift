@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "swift-cardano-network",
+    name: "SwiftCardanoNetwork",
     platforms: [
         .macOS(.v14),
         .iOS(.v17),
